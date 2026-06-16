@@ -6,8 +6,8 @@ Update this file after every completed feature. Any AI agent reading this should
 
 ## Current Status
 
-**Phase:** Phase 2 — AI Generation Pipeline 🔄 IN PROGRESS
-**Last completed:** B-roll integration (Item 30)
+**Phase:** Phase 2 — AI Generation Pipeline ✅ COMPLETED (Consolidated & Type-Checked on main)
+**Last completed:** Branch split audit, consolidation, and main-branch merge (Items 26-30 fully integrated)
 **Next:** Watermark engine (Item 31)
 
 ---
@@ -98,7 +98,7 @@ Update this file after every completed feature. Any AI agent reading this should
 | 2026-06-16 | Caption generation (Item 28) | Created `modal/caption_generation.py` Modal app running `faster-whisper`. Configured DB migration for subtitles columns, tRPC routes, and Trigger.dev `caption_generate` job type. Rebuilt video detail view with interactive transcript cue highlighting sync, seek, manual edit, and downloads (SRT/WebVTT/TXT). |
 | 2026-06-16 | Final rendering pipeline (Item 29) | Created `modal/video_composition.py` Modal app (simulate + FFmpeg/moviepy modes). Wired `video_export` job type in `trigger/run-job.ts` — fetches export record + source video, calls Modal `/compose` with subtitles + watermark settings, updates `video_exports` table on success/failure. Deployed to Modal. `VIDEO_COMPOSITION_API_URL` + `VIDEO_COMPOSITION_API_KEY` added to `.env.local`. tsc passes clean. |
 | 2026-06-16 | B-roll integration (Item 30) | Server-side parallel search proxy (Pexels + Pixabay), updateBroll tRPC procedure, stock footage library browser tab with hover-play previews, selection tray, and DB persistence. |
-
+| 2026-06-16 | Branch Consolidation & Audit | Executed a 4-branch structured Git strategy to audit and check in all outstanding codebase files (Foundation/Auth, Studios/Libraries, Videos/Exports/Jobs, AI Pipelines). Ran `git stash -u` + `bunx tsc --noEmit` on each individual segment to verify independent compilation and type safety, then merged all cleanly into `main`. Added Python pycache rules to `.gitignore`. |
 
 ---
 
