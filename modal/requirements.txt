@@ -1,0 +1,7 @@
+modal
+pydantic
+fastapi[standard]
+opencv-python-headless
+numpy
+pillow
+pydub
