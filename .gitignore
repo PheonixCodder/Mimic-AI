@@ -63,3 +63,11 @@ next-env.d.ts
 /heygen-clone
 /heygen-clone2
 /sample
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ipynb_checkpoints/

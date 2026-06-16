@@ -13,7 +13,7 @@ import { voicesRouter } from "./voices";
 import { workspacesRouter } from "./workspaces";
 import { webhooksRouter } from "./webhooks";
 import { billingRouter } from "./billing";
-// import { clipsRouter } from "./clips";
+import { clipsRouter } from "./clips";
 
 export const appRouter = createTRPCRouter({
   health: healthRouter,
@@ -23,7 +23,7 @@ export const appRouter = createTRPCRouter({
   voices: voicesRouter,
   avatars: avatarsRouter,
   videos: videosRouter,
-  // clips: clipsRouter,
+  clips: clipsRouter,
   workspaces: workspacesRouter,
   brandKits: brandKitsRouter,
   templates: templatesRouter,
