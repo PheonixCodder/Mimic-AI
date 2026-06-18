@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+import {
+  WATERMARK_POSITIONS,
+  WATERMARK_SIZES,
+  WATERMARK_TYPES,
+} from "@/lib/watermark";
+
 export const brandKitInputSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(120),
   colors: z.object({
@@ -12,6 +18,11 @@ export const brandKitInputSchema = z.object({
     primary: z.string().min(1, "Primary font is required"),
     header: z.string().min(1, "Header font is required"),
   }),
+  watermarkText: z.string().trim().min(1).max(120).optional(),
+  watermarkType: z.enum(WATERMARK_TYPES).optional(),
+  watermarkPosition: z.enum(WATERMARK_POSITIONS).optional(),
+  watermarkOpacity: z.number().min(0.1).max(1).optional(),
+  watermarkSize: z.enum(WATERMARK_SIZES).optional(),
 });
 
 export type BrandKitInput = z.infer<typeof brandKitInputSchema>;
@@ -33,6 +44,11 @@ export type BrandKitRow = {
     primary: string;
     header: string;
   };
+  watermark_text: string;
+  watermark_type: "text" | "logo";
+  watermark_position: "top-left" | "top-right" | "bottom-left" | "bottom-right";
+  watermark_opacity: number;
+  watermark_size: "small" | "medium" | "large";
   created_at: string;
   updated_at: string;
 };

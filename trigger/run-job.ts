@@ -128,6 +128,7 @@ export const runJobTask = task({
       const isRealPipelineAvailable =
         process.env.CHATTERBOX_API_URL &&
         process.env.TALKING_AVATAR_API_URL;
+      const isClipPipelineAvailable = !!process.env.VIDEO_GENERATION_API_URL;
       const isCaptionPipelineAvailable = !!process.env.CAPTION_GENERATION_API_URL;
       const isCompositionPipelineAvailable = !!process.env.VIDEO_COMPOSITION_API_URL;
 
@@ -165,6 +166,22 @@ export const runJobTask = task({
         await db.database.from("jobs").update({ progress: 35 }).eq("id", payload.jobId);
 
         if (isCompositionPipelineAvailable) {
+          let watermarkLogoKey: string | null = null;
+          if (
+            exportRecord.watermark_enabled &&
+            exportRecord.watermark_type === "logo"
+          ) {
+            const { data: brandKits } = await db.database
+              .from("brand_kits")
+              .select("logo_key")
+              .eq("workspace_id", job.workspace_id)
+              .order("updated_at", { ascending: false })
+              .limit(1);
+            watermarkLogoKey =
+              (brandKits?.[0] as { logo_key?: string | null } | undefined)
+                ?.logo_key ?? null;
+          }
+
           const composeResponse = await fetch(`${process.env.VIDEO_COMPOSITION_API_URL}/compose`, {
             method: "POST",
             headers: {
@@ -175,7 +192,12 @@ export const runJobTask = task({
               video_r2_key: video.r2_object_key,
               subtitles: video.subtitles || [],
               watermark_enabled: exportRecord.watermark_enabled,
-              watermark_text: "mimic.ai",
+              watermark_text: exportRecord.watermark_text || "mimic.ai",
+              watermark_type: exportRecord.watermark_type || "text",
+              watermark_position: exportRecord.watermark_position || "bottom-right",
+              watermark_opacity: exportRecord.watermark_opacity ?? 0.4,
+              watermark_size: exportRecord.watermark_size || "medium",
+              watermark_logo_key: watermarkLogoKey,
               resolution: exportRecord.resolution,
               format: exportRecord.format,
               output_r2_key: outputR2Key,
@@ -316,7 +338,77 @@ export const runJobTask = task({
           throw new Error(`Failed to save subtitles: ${saveError.message}`);
         }
         await delay(1000);
-      } else if (isRealPipelineAvailable && (jobType === "video_render" || jobType === "video_preview" || jobType === "clip_generate")) {
+      } else if (jobType === "clip_generate" && isClipPipelineAvailable) {
+        // --- CLIP GENERATION ---
+        const { data: clip, error: clipError } = await db.database
+          .from("video_clips")
+          .select("*")
+          .eq("id", job.resource_id)
+          .single();
+
+        if (clipError || !clip) {
+          throw new Error(`Clip not found for job: ${clipError?.message || "unknown"}`);
+        }
+
+        // Stage 1: generating_clip
+        metadata.set("stage", "generating_clip");
+        await db.database.from("jobs").update({ progress: 30 }).eq("id", payload.jobId);
+
+        const outputR2Key = `clips/${job.workspace_id}/${job.resource_id}.mp4`;
+
+        let watermarkLogoKey: string | null = null;
+        if (clip.watermark_enabled && clip.watermark_type === "logo") {
+          const { data: brandKits } = await db.database
+            .from("brand_kits")
+            .select("logo_key")
+            .eq("workspace_id", job.workspace_id)
+            .order("updated_at", { ascending: false })
+            .limit(1);
+          watermarkLogoKey =
+            (brandKits?.[0] as { logo_key?: string | null } | undefined)
+              ?.logo_key ?? null;
+        }
+
+        const response = await fetch(`${process.env.VIDEO_GENERATION_API_URL}/generate`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Api-Key": process.env.VIDEO_GENERATION_API_KEY || "",
+          },
+          body: JSON.stringify({
+            prompt: clip.prompt,
+            style: clip.style,
+            duration_seconds: clip.duration_seconds,
+            aspect_ratio: clip.aspect_ratio,
+            output_r2_key: outputR2Key,
+            watermark_enabled: clip.watermark_enabled ?? true,
+            watermark_text: clip.watermark_text || "mimic.ai",
+            watermark_type: clip.watermark_type || "text",
+            watermark_position: clip.watermark_position || "bottom-right",
+            watermark_opacity: clip.watermark_opacity ?? 0.4,
+            watermark_size: clip.watermark_size || "medium",
+            watermark_logo_key: watermarkLogoKey,
+          }),
+        });
+
+        if (!response.ok) {
+          const errBody = await response.text().catch(() => "");
+          throw new Error(`Clip generation failed (${response.status}): ${errBody}`);
+        }
+
+        // Transition progress through remaining stages
+        metadata.set("stage", "rendering_frames");
+        await db.database.from("jobs").update({ progress: 65 }).eq("id", payload.jobId);
+        await delay(1000);
+
+        metadata.set("stage", "compositing");
+        await db.database.from("jobs").update({ progress: 85 }).eq("id", payload.jobId);
+        await delay(1000);
+
+        metadata.set("stage", "uploading_clip");
+        await db.database.from("jobs").update({ progress: 95 }).eq("id", payload.jobId);
+        await delay(1000);
+      } else if (isRealPipelineAvailable && (jobType === "video_render" || jobType === "video_preview")) {
         // Initialize S3Client for direct R2 access
         const s3Client = new S3Client({
           region: "auto",
@@ -327,61 +419,12 @@ export const runJobTask = task({
           },
         });
 
-        if (jobType === "clip_generate") {
-          // --- CLIP GENERATION ---
-          const { data: clip, error: clipError } = await db.database
-            .from("video_clips")
-            .select("*")
-            .eq("id", job.resource_id)
-            .single();
-
-          if (clipError || !clip) {
-            throw new Error(`Clip not found for job: ${clipError?.message || "unknown"}`);
-          }
-
-          // Stage 1: generating_clip
-          metadata.set("stage", "generating_clip");
-          await db.database.from("jobs").update({ progress: 30 }).eq("id", payload.jobId);
-
-          const outputR2Key = `clips/${job.workspace_id}/${job.resource_id}.mp4`;
-          const response = await fetch(`${process.env.VIDEO_GENERATION_API_URL}/generate`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Api-Key": process.env.VIDEO_GENERATION_API_KEY || "",
-            },
-            body: JSON.stringify({
-              prompt: clip.prompt,
-              style: clip.style,
-              duration_seconds: clip.duration_seconds,
-              aspect_ratio: clip.aspect_ratio,
-              output_r2_key: outputR2Key,
-            }),
-          });
-
-          if (!response.ok) {
-            throw new Error(`Clip generation failed with status ${response.status}`);
-          }
-
-          // Transition progress through remaining stages
-          metadata.set("stage", "rendering_frames");
-          await db.database.from("jobs").update({ progress: 65 }).eq("id", payload.jobId);
-          await delay(1000);
-
-          metadata.set("stage", "compositing");
-          await db.database.from("jobs").update({ progress: 85 }).eq("id", payload.jobId);
-          await delay(1000);
-
-          metadata.set("stage", "uploading_clip");
-          await db.database.from("jobs").update({ progress: 95 }).eq("id", payload.jobId);
-          await delay(1000);
-        } else {
-          // Fetch the video record
-          const { data: video, error: videoError } = await db.database
-            .from("videos")
-            .select("*")
-            .eq("id", job.resource_id)
-            .single();
+        // Fetch the video record
+        const { data: video, error: videoError } = await db.database
+          .from("videos")
+          .select("*")
+          .eq("id", job.resource_id)
+          .single();
 
         if (videoError || !video) {
           throw new Error(`Video not found for job: ${videoError?.message || "unknown"}`);
@@ -565,8 +608,7 @@ export const runJobTask = task({
           await db.database.from("jobs").update({ progress: 90 }).eq("id", payload.jobId);
           await delay(1000);
         }
-      }
-    } else {
+      } else {
         // Fallback simulated pipeline execution
         const stages = STAGES[jobType] ?? [];
         for (const stage of stages) {

@@ -96,7 +96,11 @@ export function ExportsList({ videoId, canWrite }: ExportsListProps) {
                     {exp.resolution} · {exp.format}
                   </span>
                   <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-                    {exp.watermarkEnabled ? "Watermarked" : "Watermark-free"}
+                    {exp.watermarkEnabled
+                      ? exp.watermarkType === "logo"
+                        ? "Logo watermark"
+                        : `${exp.watermarkText ?? "mimic.ai"} watermark`
+                      : "Watermark-free"}
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground">

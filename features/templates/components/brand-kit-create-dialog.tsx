@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/drawer";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useTRPC } from "@/trpc/client";
+import { SYSTEM_WATERMARK_DEFAULTS } from "@/lib/watermark";
 import { BrandKitForm } from "./brand-kit-form";
 import type { BrandKit } from "@/trpc/routers/brand-kits";
 
@@ -42,6 +43,11 @@ const DEFAULT_VALUES = {
     primary: "Inter",
     header: "Outfit",
   },
+  watermarkText: SYSTEM_WATERMARK_DEFAULTS.watermarkText,
+  watermarkType: SYSTEM_WATERMARK_DEFAULTS.watermarkType,
+  watermarkPosition: SYSTEM_WATERMARK_DEFAULTS.watermarkPosition,
+  watermarkOpacity: SYSTEM_WATERMARK_DEFAULTS.watermarkOpacity,
+  watermarkSize: SYSTEM_WATERMARK_DEFAULTS.watermarkSize,
 };
 
 type BrandKitCreateDialogProps = {
@@ -99,6 +105,11 @@ function BrandKitCreateContent({
       name: values.name,
       colors: values.colors,
       fonts: values.fonts,
+      watermarkText: values.watermarkText,
+      watermarkType: values.watermarkType,
+      watermarkPosition: values.watermarkPosition,
+      watermarkOpacity: values.watermarkOpacity,
+      watermarkSize: values.watermarkSize,
     });
   }
 
@@ -162,6 +173,11 @@ export function BrandKitCreateDialog({ children, onSuccess }: BrandKitCreateDial
       name: values.name,
       colors: values.colors,
       fonts: values.fonts,
+      watermarkText: values.watermarkText,
+      watermarkType: values.watermarkType,
+      watermarkPosition: values.watermarkPosition,
+      watermarkOpacity: values.watermarkOpacity,
+      watermarkSize: values.watermarkSize,
     });
   }
 

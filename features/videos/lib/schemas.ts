@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { watermarkFieldsSchema } from "@/lib/watermark";
 import {
   VIDEO_ASPECT_RATIOS,
   VIDEO_RESOLUTIONS,
@@ -53,12 +54,13 @@ export type VideoRow = {
   updated_at: string;
 };
 
-export const videoExportCreateSchema = z.object({
-  videoId: z.string().uuid("Video ID is required"),
-  resolution: z.enum(VIDEO_RESOLUTIONS),
-  format: z.enum(["mp4", "webm"]),
-  watermarkEnabled: z.boolean(),
-});
+export const videoExportCreateSchema = z
+  .object({
+    videoId: z.string().uuid("Video ID is required"),
+    resolution: z.enum(VIDEO_RESOLUTIONS),
+    format: z.enum(["mp4", "webm"]),
+  })
+  .merge(watermarkFieldsSchema);
 
 export type VideoExportCreateInput = z.infer<typeof videoExportCreateSchema>;
 
@@ -70,6 +72,16 @@ export type VideoExportRow = {
   resolution: "720p" | "1080p" | "4k";
   format: "mp4" | "webm";
   watermark_enabled: boolean;
+  watermark_text: string | null;
+  watermark_type: "text" | "logo" | null;
+  watermark_position:
+    | "top-left"
+    | "top-right"
+    | "bottom-left"
+    | "bottom-right"
+    | null;
+  watermark_opacity: number | null;
+  watermark_size: "small" | "medium" | "large" | null;
   status: "pending" | "processing" | "completed" | "failed";
   r2_object_key: string | null;
   r2_object_url: string | null;

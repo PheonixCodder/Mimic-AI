@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ShieldAlert, Sparkles, Loader2, Download } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Loader2, Download } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -34,6 +34,11 @@ import {
 } from "@/components/ui/select";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { useIsMobile } from "@/hooks/use-mobile";
+import {
+  createDefaultWatermarkSettings,
+  WatermarkSettingsFields,
+  type WatermarkSettingsValue,
+} from "@/features/watermark/components/watermark-settings-fields";
 import { useTRPC } from "@/trpc/client";
 import type { VideoExport } from "@/trpc/routers/exports";
 
@@ -51,8 +56,29 @@ export function ExportDialog({ videoId, children, onSuccess }: ExportDialogProps
 
   const [resolution, setResolution] = useState<"720p" | "1080p" | "4k">("1080p");
   const [format, setFormat] = useState<"mp4" | "webm">("mp4");
-  const [watermarkEnabled, setWatermarkEnabled] = useState(true);
-  const [isPremiumWorkspace, setIsPremiumWorkspace] = useState(false); // Simulated premium toggle
+  const [watermarkSettings, setWatermarkSettings] = useState<WatermarkSettingsValue>(
+    createDefaultWatermarkSettings(),
+  );
+  const [devPremiumOverride, setDevPremiumOverride] = useState(false);
+
+  const { data: billingStatus } = useQuery({
+    ...trpc.billing.getStatus.queryOptions(),
+    enabled: open,
+  });
+
+  const isPremium =
+    (billingStatus?.hasActiveSubscription ?? false) || devPremiumOverride;
+
+  const checkoutMutation = useMutation(
+    trpc.billing.createCheckout.mutationOptions({
+      onSuccess: (data) => {
+        window.location.href = data.checkoutUrl;
+      },
+      onError: (e) => {
+        toast.error(e.message ?? "Failed to start checkout");
+      },
+    }),
+  );
 
   const exportMutation = useMutation(
     trpc.exports.create.mutationOptions({
@@ -63,10 +89,10 @@ export function ExportDialog({ videoId, children, onSuccess }: ExportDialogProps
         toast.success("Export job started!");
         onSuccess?.(created);
         setOpen(false);
-        // Reset states
         setResolution("1080p");
         setFormat("mp4");
-        setWatermarkEnabled(true);
+        setWatermarkSettings(createDefaultWatermarkSettings());
+        setDevPremiumOverride(false);
       },
       onError: (e) => {
         toast.error(e.message ?? "Failed to create export job");
@@ -75,7 +101,7 @@ export function ExportDialog({ videoId, children, onSuccess }: ExportDialogProps
   );
 
   const handleExport = () => {
-    if (!watermarkEnabled && !isPremiumWorkspace) {
+    if (!watermarkSettings.watermarkEnabled && !isPremium) {
       toast.error("Please upgrade your workspace to remove the watermark.");
       return;
     }
@@ -84,14 +110,7 @@ export function ExportDialog({ videoId, children, onSuccess }: ExportDialogProps
       videoId,
       resolution,
       format,
-      watermarkEnabled,
-    });
-  };
-
-  const simulateUpgrade = () => {
-    setIsPremiumWorkspace(true);
-    toast.success("Workspace mock-upgraded to premium!", {
-      description: "You can now disable the watermark for exports.",
+      ...watermarkSettings,
     });
   };
 
@@ -131,50 +150,21 @@ export function ExportDialog({ videoId, children, onSuccess }: ExportDialogProps
           </Select>
         </Field>
 
-        <div className="space-y-3 pt-2">
-          <label className="flex items-center gap-2 text-sm font-medium cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={watermarkEnabled}
-              onChange={(e) => setWatermarkEnabled(e.target.checked)}
-              className="size-4 rounded border-input text-primary focus:ring-primary"
-            />
-            Include Mimic AI watermark
-          </label>
-
-          {/* Premium Watermark Gate Alert */}
-          {!watermarkEnabled && !isPremiumWorkspace ? (
-            <div className="rounded-xl border border-amber-200/50 bg-amber-50/50 p-3 text-xs text-amber-800 dark:border-amber-900/30 dark:bg-amber-950/20 dark:text-amber-400">
-              <div className="flex gap-2">
-                <ShieldAlert className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                <div className="space-y-2">
-                  <p className="font-semibold">Upgrade Required</p>
-                  <p>
-                    Removing the brand watermark requires a premium workspace plan. Try simulating
-                    an upgrade to test watermark-free renders.
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    onClick={simulateUpgrade}
-                    className="gap-1 border-amber-300 text-amber-900 hover:bg-amber-100 hover:text-amber-900 dark:border-amber-800 dark:text-amber-300 dark:hover:bg-amber-900/40"
-                  >
-                    <Sparkles className="size-3 text-amber-600 dark:text-amber-400" />
-                    Simulate Premium Upgrade
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ) : isPremiumWorkspace ? (
-            <div className="rounded-xl border border-green-200/50 bg-green-50/50 p-3 text-xs text-green-800 dark:border-green-900/30 dark:bg-green-950/20 dark:text-green-400">
-              <p className="font-semibold flex items-center gap-1.5">
-                <Sparkles className="size-3.5 text-green-600 dark:text-green-400" />
-                Premium active (Simulated) — Watermark-free exports unlocked.
-              </p>
-            </div>
-          ) : null}
-        </div>
+        <WatermarkSettingsFields
+          value={watermarkSettings}
+          onChange={(partial) =>
+            setWatermarkSettings((current) => ({ ...current, ...partial }))
+          }
+          isPremium={isPremium}
+          disabled={exportMutation.isPending}
+          showDevSimulate={process.env.NODE_ENV === "development"}
+          onSimulateUpgrade={() => {
+            setDevPremiumOverride(true);
+            toast.success("Premium simulation enabled for this export dialog.");
+          }}
+          onUpgradeCheckout={() => checkoutMutation.mutate()}
+          isCheckoutPending={checkoutMutation.isPending}
+        />
       </div>
     );
   };

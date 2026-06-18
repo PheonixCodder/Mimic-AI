@@ -81,6 +81,11 @@ with active_image.imports():
         subtitles: list[SubtitleCue] | None = None
         watermark_enabled: bool = True
         watermark_text: str = "mimic.ai"
+        watermark_type: str = "text"
+        watermark_position: str = "bottom-right"
+        watermark_opacity: float = 0.4
+        watermark_size: str = "medium"
+        watermark_logo_key: str | None = None
         resolution: str = "1080p"  # 720p, 1080p, 4k
         aspect_ratio: str = "16:9"  # 16:9, 9:16, 1:1
         format: str = "mp4"  # mp4, webm
@@ -121,6 +126,31 @@ with active_image.imports():
         s = int(seconds % 60)
         ms = int((seconds % 1) * 1000)
         return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+    def _watermark_font_size(size: str, height: int) -> int:
+        scale = {"small": 14, "medium": 20, "large": 28}.get(size, 20)
+        return max(12, int(scale * (height / 1080.0)))
+
+    def _watermark_logo_scale(size: str, width: int) -> float:
+        ratio = {"small": 0.10, "medium": 0.15, "large": 0.22}.get(size, 0.15)
+        return max(0.08, ratio)
+
+    def _watermark_overlay_position(position: str, margin: int = 20) -> tuple[str, str]:
+        mapping = {
+            "top-left": (str(margin), str(margin)),
+            "top-right": (f"main_w-overlay_w-{margin}", str(margin)),
+            "bottom-left": (str(margin), f"main_h-overlay_h-{margin}"),
+            "bottom-right": (f"main_w-overlay_w-{margin}", f"main_h-overlay_h-{margin}"),
+        }
+        return mapping.get(position, mapping["bottom-right"])
+
+    def _escape_drawtext(text: str) -> str:
+        return (
+            text.replace("\\", "\\\\")
+            .replace(":", "\\:")
+            .replace("'", "\\'")
+            .replace("%", "\\%")
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -166,43 +196,93 @@ class VideoComposition:
                             f.write(f"{cue.text}\n\n")
 
                 # 2. Build FFmpeg filter chain
-                filters = []
-                filters.append(f"scale={w}:{h}")
+                margin = 20
+                opacity = max(0.1, min(1.0, float(req.watermark_opacity)))
+                logo_path = (
+                    f"/r2/{req.watermark_logo_key}"
+                    if req.watermark_enabled
+                    and req.watermark_type == "logo"
+                    and req.watermark_logo_key
+                    else None
+                )
+                has_logo = bool(logo_path and os.path.exists(logo_path))
 
-                if has_subs:
-                    # Escape path for FFmpeg subtitles filter
-                    escaped_srt = srt_path.replace("\\", "/").replace(":", "\\:")
-                    # Font size varies by vertical resolution (e.g. 18px for 720p, 26px for 1080p)
-                    font_size = int(24 * (h / 1080.0))
-                    filters.append(
-                        f"subtitles='{escaped_srt}':force_style='FontSize={font_size},Alignment=2,OutlineColour=&H80000000,BorderStyle=3'"
+                if has_logo:
+                    filter_parts = [f"[0:v]scale={w}:{h}[scaled]"]
+                    current_label = "scaled"
+
+                    if has_subs:
+                        escaped_srt = srt_path.replace("\\", "/").replace(":", "\\:")
+                        font_size = int(24 * (h / 1080.0))
+                        filter_parts.append(
+                            f"[{current_label}]subtitles='{escaped_srt}':force_style='FontSize={font_size},Alignment=2,OutlineColour=&H80000000,BorderStyle=3'[vsub]"
+                        )
+                        current_label = "vsub"
+
+                    logo_scale = _watermark_logo_scale(req.watermark_size, w)
+                    overlay_x, overlay_y = _watermark_overlay_position(req.watermark_position, margin)
+                    filter_parts.append(
+                        f"[1:v]scale=iw*{logo_scale}:-1,format=rgba,colorchannelmixer=aa={opacity}[logo]"
                     )
-
-                if req.watermark_enabled:
-                    # Watermark text size scales with resolution
-                    wm_size = int(20 * (h / 1080.0))
-                    filters.append(
-                        f"drawtext=text='{req.watermark_text}':x=w-tw-20:y=h-th-20:fontsize={wm_size}:fontcolor=white@0.4"
+                    filter_parts.append(
+                        f"[{current_label}][logo]overlay={overlay_x}:{overlay_y}[vout]"
                     )
+                    filter_complex = ";".join(filter_parts)
 
-                vf_chain = ",".join(filters)
+                    codec_args = []
+                    if req.format == "webm":
+                        codec_args = ["-c:v", "libvpx-vp9", "-b:v", "1500k", "-c:a", "libopus"]
+                    else:
+                        codec_args = ["-c:v", "libx264", "-preset", "fast", "-crf", "23", "-c:a", "aac"]
 
-                # 3. Choose encoder codecs based on target format
-                codec_args = []
-                if req.format == "webm":
-                    # VP9 video + Opus audio
-                    codec_args = ["-c:v", "libvpx-vp9", "-b:v", "1500k", "-c:a", "libopus"]
+                    ffmpeg_cmd = [
+                        "ffmpeg", "-y",
+                        "-i", input_path,
+                        "-i", logo_path,
+                        "-filter_complex", filter_complex,
+                        "-map", "[vout]",
+                        "-map", "0:a?",
+                        *codec_args,
+                        out_local,
+                    ]
                 else:
-                    # H.264 video + AAC audio (standard mp4)
-                    codec_args = ["-c:v", "libx264", "-preset", "fast", "-crf", "23", "-c:a", "aac"]
+                    filters = [f"scale={w}:{h}"]
 
-                ffmpeg_cmd = [
-                    "ffmpeg", "-y",
-                    "-i", input_path,
-                    "-vf", vf_chain,
-                    *codec_args,
-                    out_local,
-                ]
+                    if has_subs:
+                        escaped_srt = srt_path.replace("\\", "/").replace(":", "\\:")
+                        font_size = int(24 * (h / 1080.0))
+                        filters.append(
+                            f"subtitles='{escaped_srt}':force_style='FontSize={font_size},Alignment=2,OutlineColour=&H80000000,BorderStyle=3'"
+                        )
+
+                    if req.watermark_enabled and req.watermark_type == "text":
+                        wm_size = _watermark_font_size(req.watermark_size, h)
+                        x_expr, y_expr = {
+                            "top-left": (str(margin), str(margin)),
+                            "top-right": (f"w-tw-{margin}", str(margin)),
+                            "bottom-left": (str(margin), f"h-th-{margin}"),
+                            "bottom-right": (f"w-tw-{margin}", f"h-th-{margin}"),
+                        }.get(req.watermark_position, (f"w-tw-{margin}", f"h-th-{margin}"))
+                        escaped_text = _escape_drawtext(req.watermark_text)
+                        filters.append(
+                            f"drawtext=text='{escaped_text}':x={x_expr}:y={y_expr}:fontsize={wm_size}:fontcolor=white@{opacity}"
+                        )
+
+                    vf_chain = ",".join(filters)
+
+                    codec_args = []
+                    if req.format == "webm":
+                        codec_args = ["-c:v", "libvpx-vp9", "-b:v", "1500k", "-c:a", "libopus"]
+                    else:
+                        codec_args = ["-c:v", "libx264", "-preset", "fast", "-crf", "23", "-c:a", "aac"]
+
+                    ffmpeg_cmd = [
+                        "ffmpeg", "-y",
+                        "-i", input_path,
+                        "-vf", vf_chain,
+                        *codec_args,
+                        out_local,
+                    ]
 
                 # Run FFmpeg transcode
                 result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)

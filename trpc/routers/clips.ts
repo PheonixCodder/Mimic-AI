@@ -3,7 +3,13 @@ import { z } from "zod";
 import { tasks } from "@trigger.dev/sdk/v3";
 
 import { clipCreateSchema, type ClipRow } from "@/features/clips/lib/schemas";
+import { workspaceHasActiveSubscription } from "@/lib/billing/workspace-subscription";
 import { deleteObject } from "@/lib/r2";
+import {
+  resolveWatermarkSettings,
+  watermarkToDbColumns,
+  type BrandKitWatermarkSource,
+} from "@/lib/watermark";
 import { createTRPCRouter, workspaceProcedure } from "../init";
 
 const clipIdSchema = z.object({
@@ -23,11 +29,33 @@ function mapClip(row: ClipRow) {
     aspectRatio: row.aspect_ratio,
     resolution: row.resolution,
     status: row.status,
+    watermarkEnabled: row.watermark_enabled,
+    watermarkText: row.watermark_text,
+    watermarkType: row.watermark_type,
+    watermarkPosition: row.watermark_position,
+    watermarkOpacity: row.watermark_opacity,
+    watermarkSize: row.watermark_size,
     r2ObjectKey: row.r2_object_key,
     errorMessage: row.error_message,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+async function getLatestBrandKitWatermarkDefaults(
+  insforge: { database: { from: (table: string) => any } },
+  workspaceId: string,
+): Promise<BrandKitWatermarkSource | null> {
+  const { data } = await insforge.database
+    .from("brand_kits")
+    .select(
+      "watermark_text, watermark_type, watermark_position, watermark_opacity, watermark_size, logo_key",
+    )
+    .eq("workspace_id", workspaceId)
+    .order("updated_at", { ascending: false })
+    .limit(1);
+
+  return (data?.[0] as BrandKitWatermarkSource | undefined) ?? null;
 }
 
 function buildSearchFilter(query?: string) {
@@ -150,6 +178,23 @@ export const clipsRouter = createTRPCRouter({
         }
       }
 
+      const isPremium = await workspaceHasActiveSubscription(
+        ctx.workspace.id,
+        ctx.workspace.name,
+        ctx.user.email ?? `workspace-${ctx.workspace.id}@mimic.ai`,
+      );
+
+      const brandKit = await getLatestBrandKitWatermarkDefaults(
+        ctx.insforge,
+        ctx.workspace.id,
+      );
+
+      const watermark = resolveWatermarkSettings({
+        isPremium,
+        brandKit,
+        userInput: input,
+      });
+
       const { data, error } = await ctx.insforge.database
         .from("video_clips")
         .insert({
@@ -162,6 +207,7 @@ export const clipsRouter = createTRPCRouter({
           duration_seconds: input.durationSeconds,
           aspect_ratio: input.aspectRatio,
           resolution: input.resolution,
+          ...watermarkToDbColumns(watermark),
           status: "draft",
         })
         .select();

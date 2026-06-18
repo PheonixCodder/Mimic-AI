@@ -3,7 +3,13 @@ import { z } from "zod";
 import { tasks } from "@trigger.dev/sdk/v3";
 
 import { videoExportCreateSchema, type VideoExportRow } from "@/features/videos/lib/schemas";
+import { workspaceHasActiveSubscription } from "@/lib/billing/workspace-subscription";
 import { deleteObject } from "@/lib/r2";
+import {
+  resolveWatermarkSettings,
+  watermarkToDbColumns,
+  type BrandKitWatermarkSource,
+} from "@/lib/watermark";
 import { createTRPCRouter, workspaceProcedure } from "../init";
 
 const exportIdSchema = z.object({
@@ -19,6 +25,22 @@ function assertCanWrite(role: string) {
   }
 }
 
+async function getLatestBrandKitWatermarkDefaults(
+  insforge: { database: { from: (table: string) => any } },
+  workspaceId: string,
+): Promise<BrandKitWatermarkSource | null> {
+  const { data } = await insforge.database
+    .from("brand_kits")
+    .select(
+      "watermark_text, watermark_type, watermark_position, watermark_opacity, watermark_size, logo_key",
+    )
+    .eq("workspace_id", workspaceId)
+    .order("updated_at", { ascending: false })
+    .limit(1);
+
+  return (data?.[0] as BrandKitWatermarkSource | undefined) ?? null;
+}
+
 function mapVideoExport(row: VideoExportRow) {
   return {
     id: row.id,
@@ -28,6 +50,11 @@ function mapVideoExport(row: VideoExportRow) {
     resolution: row.resolution,
     format: row.format,
     watermarkEnabled: row.watermark_enabled,
+    watermarkText: row.watermark_text,
+    watermarkType: row.watermark_type,
+    watermarkPosition: row.watermark_position,
+    watermarkOpacity: row.watermark_opacity,
+    watermarkSize: row.watermark_size,
     status: row.status,
     r2ObjectKey: row.r2_object_key,
     r2ObjectUrl: row.r2_object_url,
@@ -62,7 +89,6 @@ export const exportsRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       assertCanWrite(ctx.role);
 
-      // Validate video exists in workspace
       const { data: video, error: videoError } = await ctx.insforge.database
         .from("videos")
         .select("id, title, status")
@@ -84,7 +110,23 @@ export const exportsRouter = createTRPCRouter({
         });
       }
 
-      // Create new export record
+      const isPremium = await workspaceHasActiveSubscription(
+        ctx.workspace.id,
+        ctx.workspace.name,
+        ctx.user.email ?? `workspace-${ctx.workspace.id}@mimic.ai`,
+      );
+
+      const brandKit = await getLatestBrandKitWatermarkDefaults(
+        ctx.insforge,
+        ctx.workspace.id,
+      );
+
+      const watermark = resolveWatermarkSettings({
+        isPremium,
+        brandKit,
+        userInput: input,
+      });
+
       const { data, error } = await ctx.insforge.database
         .from("video_exports")
         .insert([
@@ -94,7 +136,7 @@ export const exportsRouter = createTRPCRouter({
             created_by: ctx.user.id,
             resolution: input.resolution,
             format: input.format,
-            watermark_enabled: input.watermarkEnabled,
+            ...watermarkToDbColumns(watermark),
             status: "pending",
           },
         ])
@@ -110,7 +152,6 @@ export const exportsRouter = createTRPCRouter({
 
       const createdExport = data as VideoExportRow;
 
-      // Create a unified job tracking record
       const { data: job, error: jobError } = await ctx.insforge.database
         .from("jobs")
         .insert([
@@ -149,7 +190,6 @@ export const exportsRouter = createTRPCRouter({
         },
       });
 
-      // Trigger background task execution
       await tasks.trigger("run-job", { jobId: job.id });
 
       return mapVideoExport(createdExport);
@@ -160,7 +200,6 @@ export const exportsRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       assertCanWrite(ctx.role);
 
-      // Check if export exists in workspace
       const { data: exportItem, error: fetchError } = await ctx.insforge.database
         .from("video_exports")
         .select("*")
@@ -175,7 +214,6 @@ export const exportsRouter = createTRPCRouter({
         });
       }
 
-      // Delete from DB
       const { error } = await ctx.insforge.database
         .from("video_exports")
         .delete()
@@ -188,7 +226,6 @@ export const exportsRouter = createTRPCRouter({
         });
       }
 
-      // Delete from R2 if completed
       const record = exportItem as VideoExportRow;
       if (record.r2_object_key) {
         try {

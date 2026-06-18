@@ -4,6 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { polar } from "@/lib/polar";
 import { env } from "@/lib/env";
 import { insforgeAdmin } from "@/lib/insforge/admin";
+import { workspaceHasActiveSubscription } from "@/lib/billing/workspace-subscription";
 import { createTRPCRouter, workspaceProcedure } from "../init";
 
 /**
@@ -55,8 +56,11 @@ export const billingRouter = createTRPCRouter({
         ctx.user.email ?? `workspace-${ctx.workspace.id}@mimic.ai`,
       );
 
-      const hasActiveSubscription =
-        (customerState.activeSubscriptions ?? []).length > 0;
+      const hasActiveSubscription = await workspaceHasActiveSubscription(
+        ctx.workspace.id,
+        ctx.workspace.name,
+        ctx.user.email ?? `workspace-${ctx.workspace.id}@mimic.ai`,
+      );
 
       // Sum estimated costs from all active subscriptions
       let estimatedCostCents = 0;

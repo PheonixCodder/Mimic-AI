@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/drawer";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useTRPC } from "@/trpc/client";
+import { SYSTEM_WATERMARK_DEFAULTS } from "@/lib/watermark";
 import { BrandKitForm } from "./brand-kit-form";
 import type { BrandKit } from "@/trpc/routers/brand-kits";
 
@@ -43,6 +44,11 @@ export function BrandKitEditDialog({ kit, open, onOpenChange, onSuccess }: Brand
     logoFile: null as File | null,
     colors: { primary: "#16A34A", secondary: "#15803D", background: "#F0FDF4", text: "#166534" },
     fonts: { primary: "Inter", header: "Outfit" },
+    watermarkText: SYSTEM_WATERMARK_DEFAULTS.watermarkText,
+    watermarkType: SYSTEM_WATERMARK_DEFAULTS.watermarkType,
+    watermarkPosition: SYSTEM_WATERMARK_DEFAULTS.watermarkPosition,
+    watermarkOpacity: SYSTEM_WATERMARK_DEFAULTS.watermarkOpacity,
+    watermarkSize: SYSTEM_WATERMARK_DEFAULTS.watermarkSize,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -53,6 +59,11 @@ export function BrandKitEditDialog({ kit, open, onOpenChange, onSuccess }: Brand
         logoFile: null,
         colors: kit.colors,
         fonts: kit.fonts,
+        watermarkText: kit.watermarkText,
+        watermarkType: kit.watermarkType,
+        watermarkPosition: kit.watermarkPosition,
+        watermarkOpacity: kit.watermarkOpacity,
+        watermarkSize: kit.watermarkSize,
       });
       setErrors({});
     }
@@ -91,6 +102,11 @@ export function BrandKitEditDialog({ kit, open, onOpenChange, onSuccess }: Brand
       name: values.name,
       colors: values.colors,
       fonts: values.fonts,
+      watermarkText: values.watermarkText,
+      watermarkType: values.watermarkType,
+      watermarkPosition: values.watermarkPosition,
+      watermarkOpacity: values.watermarkOpacity,
+      watermarkSize: values.watermarkSize,
     });
   }
 

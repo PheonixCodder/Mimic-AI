@@ -92,7 +92,7 @@ with active_image.imports():
     api_key_header = APIKeyHeader(name="X-Api-Key", auto_error=False)
 
     def _make_verify_api_key(api_key: str):
-        async def verify_api_key(key: Security(api_key_header)):
+        async def verify_api_key(key: str = Security(api_key_header)):
             if key != api_key:
                 raise HTTPException(status_code=401, detail="Invalid API key")
         return verify_api_key

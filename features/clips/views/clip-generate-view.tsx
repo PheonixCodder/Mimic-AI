@@ -3,11 +3,16 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Film, Loader2, ArrowLeft } from "lucide-react";
-import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import Link from "next/link";
 
 import { DashboardPageShell } from "@/features/dashboard/components/dashboard-page-shell";
+import {
+  createDefaultWatermarkSettings,
+  WatermarkSettingsFields,
+  type WatermarkSettingsValue,
+} from "@/features/watermark/components/watermark-settings-fields";
 import {
   Select,
   SelectContent,
@@ -62,8 +67,27 @@ export function ClipGenerateView() {
   const [aspectRatio, setAspectRatio] = useState<ClipAspectRatio>("16:9");
   const [resolution, setResolution] = useState<ClipResolution>("1080p");
   const [projectId, setProjectId] = useState<string>("none");
+  const [watermarkSettings, setWatermarkSettings] = useState<WatermarkSettingsValue>(
+    createDefaultWatermarkSettings(),
+  );
+  const [devPremiumOverride, setDevPremiumOverride] = useState(false);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const { data: billingStatus } = useQuery(trpc.billing.getStatus.queryOptions());
+  const isPremium =
+    (billingStatus?.hasActiveSubscription ?? false) || devPremiumOverride;
+
+  const checkoutMutation = useMutation(
+    trpc.billing.createCheckout.mutationOptions({
+      onSuccess: (data) => {
+        window.location.href = data.checkoutUrl;
+      },
+      onError: (e) => {
+        toast.error(e.message ?? "Failed to start checkout");
+      },
+    }),
+  );
 
   const generateMutation = useMutation(
     trpc.clips.generate.mutationOptions({
@@ -113,6 +137,7 @@ export function ClipGenerateView() {
       aspectRatio,
       resolution,
       projectId: projectId === "none" ? undefined : projectId,
+      ...watermarkSettings,
     });
   };
 
@@ -290,6 +315,22 @@ export function ClipGenerateView() {
               </SelectContent>
             </Select>
           </Field>
+
+          <WatermarkSettingsFields
+            value={watermarkSettings}
+            onChange={(partial) =>
+              setWatermarkSettings((current) => ({ ...current, ...partial }))
+            }
+            isPremium={isPremium}
+            disabled={isPending}
+            showDevSimulate={process.env.NODE_ENV === "development"}
+            onSimulateUpgrade={() => {
+              setDevPremiumOverride(true);
+              toast.success("Premium simulation enabled for clip generation.");
+            }}
+            onUpgradeCheckout={() => checkoutMutation.mutate()}
+            isCheckoutPending={checkoutMutation.isPending}
+          />
 
           <div className="pt-2">
             <Button

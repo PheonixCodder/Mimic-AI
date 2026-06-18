@@ -70,18 +70,30 @@ simulate_image = modal.Image.debian_slim(python_version="3.12").apt_install(
 
 hallo3_image = (
     modal.Image.from_registry(
-        "nvidia/cuda:12.1.1-devel-ubuntu20.04", add_python="3.10"
+        "nvidia/cuda:12.1.1-devel-ubuntu22.04", add_python="3.11"
     )
     .env({"DEBIAN_FRONTEND": "noninteractive"})
-    .apt_install("git", "ffmpeg", "clang", "libaio-dev")
-    # NOTE: hallo3's own requirements are installed from the cloned repo
-    .run_commands(
-        "git clone https://github.com/fudan-generative-vision/hallo3 /hallo3"
+    .apt_install(
+        "git",
+        "ffmpeg",
+        "clang",
+        "libaio-dev",
+        "pkg-config",
+        "libavformat-dev",
+        "libavcodec-dev",
+        "libavdevice-dev",
+        "libavutil-dev",
+        "libswscale-dev",
+        "libswresample-dev",
+        "libavfilter-dev",
     )
     .run_commands(
+        "git clone --depth 1 https://github.com/fudan-generative-vision/hallo3 /hallo3",
+        "sed -i '/^pyav/d' /hallo3/requirements.txt",
+        "python -m pip install --upgrade pip",
         "pip install -r /hallo3/requirements.txt",
     )
-    .run_commands("ln -s /models/pretrained_models /hallo3/pretrained_models")
+    .run_commands("ln -sfn /models/pretrained_models /hallo3/pretrained_models")
     .run_function(download_hallo3_models, volumes={"/models": hallo3_volume})
 )
 
@@ -154,6 +166,35 @@ with active_image.imports():
         message: str
 
 
+# Helper for ffmpeg error visibility
+# ------------------------------------------------------------------
+
+def _run_ffmpeg(
+    args: list[str],
+    *,
+    check: bool = True,
+    input_data: bytes | None = None,
+) -> subprocess.CompletedProcess:
+    """Run ffmpeg, capture stderr, and print it if the command fails."""
+    print(f"[ffmpeg] {' '.join(args)}")
+    proc = subprocess.run(
+        args,
+        input=input_data,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if proc.returncode != 0 and check:
+        stderr = proc.stderr.decode("utf-8", errors="ignore") if proc.stderr else ""
+        stdout = proc.stdout.decode("utf-8", errors="ignore") if proc.stdout else ""
+        print(f"[ffmpeg] failed with exit code {proc.returncode}")
+        print(f"[ffmpeg] stderr: {stderr}")
+        print(f"[ffmpeg] stdout: {stdout}")
+        raise subprocess.CalledProcessError(
+            proc.returncode, args, output=proc.stdout, stderr=proc.stderr
+        )
+    return proc
+
+
 # ===================================================================
 # Simulate-mode helpers (OpenCV-based face-motion simulation)
 # ===================================================================
@@ -222,58 +263,61 @@ def _simulate_talking(
 
     amps = _amplitude_envelope(audio_path, fps)
 
-    # Write frames to a temp video (no audio)
-    tmp_video = output_video_path + ".tmp.mp4"
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(tmp_video, fourcc, fps, (w, h))
+    # Write frames to a local temp video (no audio) - avoid writing temp files to R2 mount
+    tmp_dir = tempfile.mkdtemp()
+    try:
+        tmp_video = os.path.join(tmp_dir, "video.tmp.mp4")
+        final_tmp = os.path.join(tmp_dir, "final.mp4")
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(tmp_video, fourcc, fps, (w, h))
 
-    max_scale = 0.06  # max jaw-displacement as fraction of mouth_h
+        max_scale = 0.06  # max jaw-displacement as fraction of mouth_h
 
-    for amp in amps:
-        canvas = frame.copy()
+        for amp in amps:
+            canvas = frame.copy()
 
-        # Scale the mouth region vertically by a small amount
-        displacement = int(max_scale * mouth_h * amp)
-        if displacement < 1:
+            # Scale the mouth region vertically by a small amount
+            displacement = int(max_scale * mouth_h * amp)
+            if displacement < 1:
+                writer.write(canvas)
+                continue
+
+            # Extract mouth ROI, stretch it vertically, paste it back
+            roi = frame[mouth_y : mouth_y + mouth_h, mouth_x : mouth_x + mouth_w]
+            stretched = cv2.resize(roi, (mouth_w, mouth_h + displacement))
+
+            # Determine how much of the stretched ROI fits
+            paste_h = min(stretched.shape[0], h - mouth_y)
+            paste_w = min(stretched.shape[1], w - mouth_x)
+            canvas[mouth_y : mouth_y + paste_h, mouth_x : mouth_x + paste_w] = (
+                stretched[:paste_h, :paste_w]
+            )
+
             writer.write(canvas)
-            continue
 
-        # Extract mouth ROI, stretch it vertically, paste it back
-        roi = frame[mouth_y : mouth_y + mouth_h, mouth_x : mouth_x + mouth_w]
-        stretched = cv2.resize(roi, (mouth_w, mouth_h + displacement))
+        writer.release()
 
-        # Determine how much of the stretched ROI fits
-        paste_h = min(stretched.shape[0], h - mouth_y)
-        paste_w = min(stretched.shape[1], w - mouth_x)
-        canvas[mouth_y : mouth_y + paste_h, mouth_x : mouth_x + paste_w] = (
-            stretched[:paste_h, :paste_w]
+        # Merge audio + video with ffmpeg, then copy result to R2
+        _run_ffmpeg(
+            [
+                "ffmpeg",
+                "-y",
+                "-i", tmp_video,
+                "-i", audio_path,
+                "-c:v", "libx264",
+                "-preset", "fast",
+                "-c:a", "aac",
+                "-shortest",
+                "-movflags", "+faststart",
+                final_tmp,
+            ]
         )
 
-        writer.write(canvas)
-
-    writer.release()
-
-    # Merge audio + video with ffmpeg
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-y",
-            "-i", tmp_video,
-            "-i", audio_path,
-            "-c:v", "libx264",
-            "-preset", "fast",
-            "-c:a", "aac",
-            "-shortest",
-            "-movflags", "+faststart",
-            output_video_path,
-        ],
-        check=True,
-        capture_output=True,
-    )
-
-    # Clean up temp video
-    if os.path.exists(tmp_video):
-        os.remove(tmp_video)
+        os.makedirs(os.path.dirname(output_video_path), exist_ok=True)
+        shutil.copy(final_tmp, output_video_path)
+    finally:
+        if os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir)
 
 
 # ===================================================================
@@ -313,7 +357,7 @@ def _hallo3_generate(photo_path: str, audio_path: str, output_video_path: str, t
 
         # Merge audio track with ffmpeg
         final_path = os.path.join(temp_dir, "final.mp4")
-        subprocess.run(
+        _run_ffmpeg(
             [
                 "ffmpeg",
                 "-y",
@@ -323,8 +367,7 @@ def _hallo3_generate(photo_path: str, audio_path: str, output_video_path: str, t
                 "-c:a", "aac",
                 "-shortest",
                 final_path,
-            ],
-            check=True,
+            ]
         )
 
         # Copy to output

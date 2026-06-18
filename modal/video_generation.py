@@ -1,25 +1,25 @@
 """
-Mimic AI — Video Generation Modal App
-Generates short AI video clips from text prompts.
+Mimic AI — Wan2 Video Generation (GPU)
 
-Modes (controlled by VIDEO_GEN_MODE env var):
-  simulate (default) — OpenCV animated video, no GPU required
-  wan2               — Real Wan2.1 text-to-video model, A100 required
+Deploy (no env var needed):
+  modal deploy modal/video_generation.py
+
+For CPU/OpenCV simulate clips, use modal/video_generation_simulate.py instead.
 """
 
 from __future__ import annotations
 
 import modal
 
-# ---------------------------------------------------------------------------
-# Shared constants
-# ---------------------------------------------------------------------------
-
 R2_BUCKET = "mimic-ai"
 R2_ACCOUNT_ID = "aea0e987f8b0fcd0ed0c572a84d95622"
+R2_MOUNT_PATH = "/r2"
+WAN2_MODEL_ID = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+WAN2_MODEL_DIR = "/models/wan2"
 
 r2_secret = modal.Secret.from_name("cloudflare-r2")
 api_key_secret = modal.Secret.from_name("mimic-api-key")
+hf_secret = modal.Secret.from_name("hf-token")
 
 r2_mount = modal.CloudBucketMount(
     bucket_name=R2_BUCKET,
@@ -28,72 +28,53 @@ r2_mount = modal.CloudBucketMount(
     read_only=False,
 )
 
-# ---------------------------------------------------------------------------
-# Simulate mode image (OpenCV, no GPU)
-# ---------------------------------------------------------------------------
+wan2_volume = modal.Volume.from_name("wan2-cache", create_if_missing=True)
 
-simulate_image = (
-    modal.Image.debian_slim(python_version="3.12")
-    .pip_install(
-        "opencv-python-headless",
-        "numpy",
-        "pillow",
-        "fastapi[standard]",
-        "pydantic",
-    )
-    .apt_install("ffmpeg")
-)
 
-# ---------------------------------------------------------------------------
-# Wan2 mode image (GPU, real generation)
-# ---------------------------------------------------------------------------
+def download_wan2_models():
+    from huggingface_hub import snapshot_download
+
+    snapshot_download(WAN2_MODEL_ID, local_dir=WAN2_MODEL_DIR)
+
 
 wan2_image = (
     modal.Image.from_registry(
-        "nvidia/cuda:12.1.1-devel-ubuntu20.04",
-        add_python="3.10",
+        "nvidia/cuda:12.1.1-devel-ubuntu22.04",
+        add_python="3.11",
     )
+    .env({"DEBIAN_FRONTEND": "noninteractive"})
     .apt_install("ffmpeg", "git", "libgl1")
     .pip_install(
-        "torch==2.1.2",
+        "torch==2.4.1",
         "torchvision",
-        "diffusers>=0.26.0",
-        "transformers>=4.38.0",
+        "diffusers>=0.33.0",
+        "transformers>=4.49.0",
         "accelerate",
         "huggingface_hub",
         "imageio[ffmpeg]",
         "fastapi[standard]",
         "pydantic",
-        "opencv-python-headless",
         "numpy",
+        "sentencepiece",
+        "protobuf",
+    )
+    .run_function(
+        download_wan2_models,
+        volumes={"/models": wan2_volume},
+        secrets=[hf_secret],
     )
 )
 
-wan2_volume = modal.Volume.from_name("wan2-cache", create_if_missing=True)
+app = modal.App("mimic-video-generation", image=wan2_image)
 
-import os as _os
-VIDEO_GEN_MODE = _os.environ.get("VIDEO_GEN_MODE", "simulate")
-active_image = wan2_image if VIDEO_GEN_MODE == "wan2" else simulate_image
-
-app = modal.App("mimic-video-generation", image=active_image)
-
-
-# ---------------------------------------------------------------------------
-# Simulate mode implementation
-# ---------------------------------------------------------------------------
-
-with active_image.imports():
+with wan2_image.imports():
     import os
-    import math
     import subprocess
     import tempfile
-    import numpy as np
-    import cv2
+
     from fastapi import Depends, FastAPI, HTTPException, Security
     from fastapi.security.api_key import APIKeyHeader
     from pydantic import BaseModel
-
-    # ---- Pydantic models ---------------------------------------------------
 
     class ClipRequest(BaseModel):
         prompt: str
@@ -101,6 +82,13 @@ with active_image.imports():
         duration_seconds: int = 5
         aspect_ratio: str = "16:9"
         output_r2_key: str
+        watermark_enabled: bool = True
+        watermark_text: str = "mimic.ai"
+        watermark_type: str = "text"
+        watermark_position: str = "bottom-right"
+        watermark_opacity: float = 0.4
+        watermark_size: str = "medium"
+        watermark_logo_key: str | None = None
 
     class ClipResponse(BaseModel):
         output_r2_key: str
@@ -115,116 +103,120 @@ with active_image.imports():
         valid: bool
         message: str
 
-    # ---- Dimensions helper -------------------------------------------------
-
-    def _dimensions(aspect_ratio: str) -> tuple[int, int]:
+    def _wan2_dimensions(aspect_ratio: str) -> tuple[int, int]:
         mapping = {
-            "16:9": (1280, 720),
-            "9:16": (720, 1280),
-            "1:1": (720, 720),
+            "16:9": (832, 480),
+            "9:16": (480, 832),
+            "1:1": (480, 480),
         }
-        return mapping.get(aspect_ratio, (1280, 720))
+        return mapping.get(aspect_ratio, (832, 480))
 
-    # ---- Frame generators --------------------------------------------------
+    def _wan2_num_frames(duration_seconds: int) -> int:
+        fps = 16
+        duration = max(3, min(duration_seconds, 15))
+        frames = duration * fps + 1
+        return max(33, min(frames, 129))
 
-    def _frame_cinematic(frame_idx: int, total_frames: int, w: int, h: int) -> np.ndarray:
-        """Dark cinematic gradient with slow horizontal pan and film grain."""
-        t = frame_idx / max(total_frames - 1, 1)
-        shift = int(t * w * 0.08)
-        img = np.zeros((h, w, 3), dtype=np.float32)
-        for x in range(w):
-            fx = (x + shift) / w
-            r = 0.04 + fx * 0.08
-            g = 0.03 + fx * 0.05
-            b = 0.07 + fx * 0.15
-            img[:, x] = [b, g, r]
-        img = (np.clip(img, 0, 1) * 255).astype(np.uint8)
-        grain = np.random.normal(0, 6, img.shape).astype(np.int16)
-        img = np.clip(img.astype(np.int16) + grain, 0, 255).astype(np.uint8)
-        return img
-
-    def _frame_animated(frame_idx: int, total_frames: int, w: int, h: int) -> np.ndarray:
-        """Colourful animated circles moving across the frame."""
-        img = np.full((h, w, 3), (20, 20, 30), dtype=np.uint8)
-        t = frame_idx / max(total_frames - 1, 1)
-        circles = [
-            {"color": (255, 120, 60), "r": 80, "sx": 0.3, "sy": 0.5, "speed": 0.15},
-            {"color": (60, 200, 255), "r": 60, "sx": 0.7, "sy": 0.3, "speed": -0.12},
-            {"color": (180, 60, 255), "r": 50, "sx": 0.5, "sy": 0.7, "speed": 0.08},
-            {"color": (60, 255, 120), "r": 40, "sx": 0.2, "sy": 0.8, "speed": -0.10},
-        ]
-        for c in circles:
-            cx = int((c["sx"] + math.sin(t * 2 * math.pi * c["speed"]) * 0.25) * w)
-            cy = int((c["sy"] + math.cos(t * 2 * math.pi * c["speed"]) * 0.25) * h)
-            overlay = img.copy()
-            cv2.circle(overlay, (cx, cy), c["r"], c["color"], -1)
-            img = cv2.addWeighted(overlay, 0.6, img, 0.4, 0)
-        return img
-
-    def _frame_abstract(frame_idx: int, total_frames: int, w: int, h: int) -> np.ndarray:
-        """Rotating HSV gradient."""
-        t = frame_idx / max(total_frames - 1, 1)
-        img = np.zeros((h, w, 3), dtype=np.uint8)
-        cx, cy = w / 2, h / 2
-        for y in range(0, h, 2):
-            for x in range(0, w, 2):
-                angle = math.atan2(y - cy, x - cx)
-                dist = math.sqrt((x - cx) ** 2 + (y - cy) ** 2) / max(w, h)
-                hue = int((angle / (2 * math.pi) + t + dist) * 180) % 180
-                sat = 200 + int(dist * 55)
-                val = 180 + int(math.sin(t * math.pi * 4 + dist * 10) * 40)
-                img[y, x] = [hue, min(sat, 255), min(val, 255)]
-                if y + 1 < h:
-                    img[y + 1, x] = [hue, min(sat, 255), min(val, 255)]
-                if x + 1 < w:
-                    img[y, x + 1] = [hue, min(sat, 255), min(val, 255)]
-                if y + 1 < h and x + 1 < w:
-                    img[y + 1, x + 1] = [hue, min(sat, 255), min(val, 255)]
-        return cv2.cvtColor(img, cv2.COLOR_HSV2BGR)
-
-    def _frame_nature(frame_idx: int, total_frames: int, w: int, h: int) -> np.ndarray:
-        """Green/blue gradient with animated bokeh circles."""
-        t = frame_idx / max(total_frames - 1, 1)
-        img = np.zeros((h, w, 3), dtype=np.uint8)
-        for y in range(h):
-            fy = y / h
-            r = int(80 + fy * 30)
-            g = int(120 + fy * 60)
-            b = int(200 - fy * 80)
-            img[y, :] = [b, g, r]
-        np.random.seed(42)
-        bokeh_count = 12
-        bx = (np.random.rand(bokeh_count) * w).astype(int)
-        by = (np.random.rand(bokeh_count) * h).astype(int)
-        br = (np.random.rand(bokeh_count) * 40 + 15).astype(int)
-        bc = [(255, 255, 200), (200, 255, 180), (180, 230, 255)]
-        for i in range(bokeh_count):
-            cx = int(bx[i] + math.sin(t * math.pi * 2 + i) * 30) % w
-            cy = int(by[i] + math.cos(t * math.pi * 2 + i * 0.7) * 20) % h
-            blurred = img.copy()
-            cv2.circle(blurred, (cx, cy), br[i], bc[i % len(bc)], -1)
-            img = cv2.addWeighted(blurred, 0.25, img, 0.75, 0)
-            img = cv2.GaussianBlur(img, (5, 5), 0)
-        return img
-
-    def _frame_minimal(frame_idx: int, total_frames: int, w: int, h: int) -> np.ndarray:
-        """Clean light background with a slow moving subtle horizontal line."""
-        t = frame_idx / max(total_frames - 1, 1)
-        img = np.full((h, w, 3), 245, dtype=np.uint8)
-        line_y = int(h * 0.5 + math.sin(t * math.pi * 2) * h * 0.15)
-        cv2.line(img, (0, line_y), (w, line_y), (200, 200, 200), 1)
-        cv2.line(img, (0, line_y + 4), (w, line_y + 4), (220, 220, 220), 1)
-        return img
-
-    FRAME_GENERATORS = {
-        "cinematic": _frame_cinematic,
-        "animated": _frame_animated,
-        "abstract": _frame_abstract,
-        "nature": _frame_nature,
-        "minimal": _frame_minimal,
+    STYLE_PREFIXES = {
+        "cinematic": "cinematic film shot, ",
+        "animated": "animated cartoon style, ",
+        "abstract": "abstract artistic visuals, ",
+        "nature": "nature documentary footage, ",
+        "minimal": "minimal clean aesthetic, ",
     }
 
-    # ---- Auth helper -------------------------------------------------------
+    WAN2_NEGATIVE_PROMPT = (
+        "Bright tones, overexposed, static, blurred details, subtitles, style, works, "
+        "paintings, images, static, overall gray, worst quality, low quality, "
+        "JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, "
+        "poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, "
+        "still picture, messy background, three legs, many people in the background, "
+        "walking backwards"
+    )
+
+    def _watermark_font_size(size: str, height: int) -> int:
+        scale = {"small": 14, "medium": 20, "large": 28}.get(size, 20)
+        return max(12, int(scale * (height / 480.0)))
+
+    def _watermark_logo_scale(size: str) -> float:
+        return {"small": 0.10, "medium": 0.15, "large": 0.22}.get(size, 0.15)
+
+    def _watermark_overlay_position(position: str, margin: int = 20) -> tuple[str, str]:
+        mapping = {
+            "top-left": (str(margin), str(margin)),
+            "top-right": (f"main_w-overlay_w-{margin}", str(margin)),
+            "bottom-left": (str(margin), f"main_h-overlay_h-{margin}"),
+            "bottom-right": (f"main_w-overlay_w-{margin}", f"main_h-overlay_h-{margin}"),
+        }
+        return mapping.get(position, mapping["bottom-right"])
+
+    def _escape_drawtext(text: str) -> str:
+        return (
+            text.replace("\\", "\\\\")
+            .replace(":", "\\:")
+            .replace("'", "\\'")
+            .replace("%", "\\%")
+        )
+
+    def _apply_watermark_ffmpeg(
+        input_path: str, output_path: str, req: ClipRequest, width: int, height: int
+    ) -> None:
+        if not req.watermark_enabled:
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", input_path, "-c", "copy", output_path],
+                capture_output=True,
+                check=True,
+            )
+            return
+
+        margin = 20
+        opacity = max(0.1, min(1.0, float(req.watermark_opacity)))
+        logo_path = (
+            f"{R2_MOUNT_PATH}/{req.watermark_logo_key}"
+            if req.watermark_type == "logo" and req.watermark_logo_key
+            else None
+        )
+        has_logo = bool(logo_path and os.path.exists(logo_path))
+
+        if has_logo:
+            logo_scale = _watermark_logo_scale(req.watermark_size)
+            overlay_x, overlay_y = _watermark_overlay_position(req.watermark_position, margin)
+            filter_complex = ";".join(
+                [
+                    f"[1:v]scale=iw*{logo_scale}:-1,format=rgba,colorchannelmixer=aa={opacity}[logo]",
+                    f"[0:v][logo]overlay={overlay_x}:{overlay_y}[vout]",
+                ]
+            )
+            cmd = [
+                "ffmpeg", "-y", "-i", input_path, "-i", logo_path,
+                "-filter_complex", filter_complex, "-map", "[vout]", "-map", "0:a?",
+                "-c:v", "libx264", "-preset", "fast", "-crf", "23", "-c:a", "aac",
+                output_path,
+            ]
+        else:
+            wm_size = _watermark_font_size(req.watermark_size, height)
+            x_expr, y_expr = {
+                "top-left": (str(margin), str(margin)),
+                "top-right": (f"w-tw-{margin}", str(margin)),
+                "bottom-left": (str(margin), f"h-th-{margin}"),
+                "bottom-right": (f"w-tw-{margin}", f"h-th-{margin}"),
+            }.get(req.watermark_position, (f"w-tw-{margin}", f"h-th-{margin}"))
+            escaped_text = _escape_drawtext(req.watermark_text or "mimic.ai")
+            vf = (
+                f"drawtext=text='{escaped_text}':x={x_expr}:y={y_expr}:"
+                f"fontsize={wm_size}:fontcolor=white@{opacity}"
+            )
+            cmd = [
+                "ffmpeg", "-y", "-i", input_path, "-vf", vf,
+                "-c:v", "libx264", "-preset", "fast", "-crf", "23", "-c:a", "aac",
+                output_path,
+            ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"FFmpeg watermark failed:\nSTDOUT: {result.stdout}\nSTDERR: {result.stderr}"
+            )
 
     api_key_header = APIKeyHeader(name="X-Api-Key", auto_error=False)
 
@@ -232,73 +224,81 @@ with active_image.imports():
         async def verify_api_key(key: str = Security(api_key_header)):
             if key != api_key:
                 raise HTTPException(status_code=401, detail="Invalid API key")
+
         return verify_api_key
 
 
-
-# ---------------------------------------------------------------------------
-# Simulate mode Modal class
-# ---------------------------------------------------------------------------
-
 @app.cls(
-    image=simulate_image,
-    secrets=[r2_secret, api_key_secret],
-    volumes={"/r2": r2_mount},
+    image=wan2_image,
+    gpu="A100-40GB",
+    secrets=[r2_secret, api_key_secret, hf_secret],
+    volumes={R2_MOUNT_PATH: r2_mount, "/models": wan2_volume},
     scaledown_window=60 * 5,
-    timeout=300,
+    timeout=1800,
 )
-@modal.concurrent(max_inputs=4)
-class SimulateVideoGen:
+@modal.concurrent(max_inputs=2)
+class VideoGeneration:
     @modal.enter()
     def setup(self):
+        self.mode = "wan2"
         self._api_key = os.environ.get("MIMIC_API_KEY", "")
         self._verify = _make_verify_api_key(self._api_key)
+        self.pipe = None
+
+    def _ensure_wan2_pipe(self):
+        if self.pipe is not None:
+            return
+
+        import torch
+        from diffusers import AutoencoderKLWan, WanPipeline
+
+        model_source = WAN2_MODEL_DIR if os.path.isdir(WAN2_MODEL_DIR) else WAN2_MODEL_ID
+        vae = AutoencoderKLWan.from_pretrained(
+            model_source, subfolder="vae", torch_dtype=torch.float32
+        )
+        self.pipe = WanPipeline.from_pretrained(
+            model_source, vae=vae, torch_dtype=torch.bfloat16
+        )
+        self.pipe.to("cuda")
+        print(f"[VideoGeneration] Wan2 pipeline loaded from {model_source}")
 
     def _generate_clip(self, req: ClipRequest) -> ClipResponse:
-        w, h = _dimensions(req.aspect_ratio)
-        fps = 24
-        duration = max(3, min(req.duration_seconds, 30))
-        total_frames = fps * duration
+        self._ensure_wan2_pipe()
+        from diffusers.utils import export_to_video
 
-        gen_fn = FRAME_GENERATORS.get(req.style, _frame_cinematic)
+        width, height = _wan2_dimensions(req.aspect_ratio)
+        num_frames = _wan2_num_frames(req.duration_seconds)
+        fps = 16
+        duration = (num_frames - 1) / fps
+        style_prefix = STYLE_PREFIXES.get(req.style, STYLE_PREFIXES["cinematic"])
+        prompt = f"{style_prefix}{req.prompt.strip()}"
+
+        output = self.pipe(
+            prompt=prompt,
+            negative_prompt=WAN2_NEGATIVE_PROMPT,
+            width=width,
+            height=height,
+            num_frames=num_frames,
+            guidance_scale=5.0,
+        )
+        frames = output.frames[0]
 
         with tempfile.TemporaryDirectory() as tmp:
             raw_path = os.path.join(tmp, "raw.mp4")
             out_path = os.path.join(tmp, "output.mp4")
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            writer = cv2.VideoWriter(raw_path, fourcc, fps, (w, h))
-            for i in range(total_frames):
-                frame = gen_fn(i, total_frames, w, h)
-                writer.write(frame)
-            writer.release()
+            export_to_video(frames, raw_path, fps=fps)
+            _apply_watermark_ffmpeg(raw_path, out_path, req, width, height)
 
-            # Add silent audio track via ffmpeg
-            subprocess.run(
-                [
-                    "ffmpeg", "-y",
-                    "-i", raw_path,
-                    "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
-                    "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-                    "-c:a", "aac", "-shortest",
-                    out_path,
-                ],
-                capture_output=True,
-                check=True,
-            )
-
-            # Write to R2 mount
-            r2_dest = f"/r2/{req.output_r2_key}"
+            r2_dest = f"{R2_MOUNT_PATH}/{req.output_r2_key}"
             os.makedirs(os.path.dirname(r2_dest), exist_ok=True)
-            with open(out_path, "rb") as f:
-                data = f.read()
-            with open(r2_dest, "wb") as f:
-                f.write(data)
+            with open(out_path, "rb") as src, open(r2_dest, "wb") as dst:
+                dst.write(src.read())
 
         return ClipResponse(
             output_r2_key=req.output_r2_key,
             duration_seconds=float(duration),
-            width=w,
-            height=h,
+            width=width,
+            height=height,
         )
 
     @modal.asgi_app()
@@ -308,36 +308,18 @@ class SimulateVideoGen:
 
         @fast_app.get("/health")
         async def health():
-            return {"status": "ok", "mode": "simulate"}
+            return {"status": "ok", "mode": self.mode}
 
-        @fast_app.post(
-            "/generate",
-            response_model=ClipResponse,
-            dependencies=[Depends(verify)],
-        )
+        @fast_app.post("/generate", response_model=ClipResponse, dependencies=[Depends(verify)])
         async def generate(req: ClipRequest):
             return self._generate_clip(req)
 
-        @fast_app.post(
-            "/preview",
-            response_model=ClipResponse,
-            dependencies=[Depends(verify)],
-        )
+        @fast_app.post("/preview", response_model=ClipResponse, dependencies=[Depends(verify)])
         async def preview(req: ClipRequest):
-            short = ClipRequest(
-                prompt=req.prompt,
-                style=req.style,
-                duration_seconds=3,
-                aspect_ratio=req.aspect_ratio,
-                output_r2_key=req.output_r2_key,
-            )
+            short = req.model_copy(update={"duration_seconds": 3})
             return self._generate_clip(short)
 
-        @fast_app.post(
-            "/validate",
-            response_model=ValidateResponse,
-            dependencies=[Depends(verify)],
-        )
+        @fast_app.post("/validate", response_model=ValidateResponse, dependencies=[Depends(verify)])
         async def validate(req: ValidateRequest):
             if len(req.prompt.strip()) < 5:
                 return ValidateResponse(valid=False, message="Prompt is too short")
@@ -346,17 +328,13 @@ class SimulateVideoGen:
         return fast_app
 
 
-# ---------------------------------------------------------------------------
-# Local entrypoint for testing
-# ---------------------------------------------------------------------------
-
 @app.local_entrypoint()
 def test(
     prompt: str = "A beautiful sunset over the ocean",
     style: str = "cinematic",
     output_key: str = "clips/test/output.mp4",
 ):
-    gen = SimulateVideoGen()
+    gen = VideoGeneration()
     req = ClipRequest(
         prompt=prompt,
         style=style,

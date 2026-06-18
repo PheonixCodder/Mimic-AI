@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { brandKitInputSchema, type BrandKitRow } from "@/features/templates/lib/schemas";
 import { deleteObject } from "@/lib/r2";
+import { watermarkBrandKitToDb } from "@/lib/watermark";
 import { createTRPCRouter, workspaceProcedure } from "../init";
 
 const brandKitIdSchema = z.object({
@@ -28,6 +29,11 @@ function mapBrandKit(row: BrandKitRow) {
     logoKey: row.logo_key,
     colors: row.colors,
     fonts: row.fonts,
+    watermarkText: row.watermark_text,
+    watermarkType: row.watermark_type,
+    watermarkPosition: row.watermark_position,
+    watermarkOpacity: Number(row.watermark_opacity),
+    watermarkSize: row.watermark_size,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -106,6 +112,7 @@ export const brandKitsRouter = createTRPCRouter({
           name: input.name,
           colors: input.colors,
           fonts: input.fonts,
+          ...watermarkBrandKitToDb(input),
         })
         .select("*")
         .single();
@@ -135,6 +142,7 @@ export const brandKitsRouter = createTRPCRouter({
           name: input.name,
           colors: input.colors,
           fonts: input.fonts,
+          ...watermarkBrandKitToDb(input),
         })
         .eq("id", input.id)
         .eq("workspace_id", ctx.workspace.id)

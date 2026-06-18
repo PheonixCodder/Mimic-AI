@@ -2,12 +2,25 @@
 
 import { useState } from "react";
 import { useDropzone } from "react-dropzone";
-import { ImageIcon, FolderOpen, X, Palette, Type } from "lucide-react";
+import { ImageIcon, FolderOpen, X, Palette, Type, Stamp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, FieldLabel, FieldError } from "@/components/ui/field";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { BrandKitInput } from "@/features/templates/lib/schemas";
+import {
+  SYSTEM_WATERMARK_DEFAULTS,
+  type WatermarkPosition,
+  type WatermarkSize,
+  type WatermarkType,
+} from "@/lib/watermark";
 
 export const BRAND_FONTS = [
   "Inter",
@@ -226,6 +239,117 @@ export function BrandKitForm({
                 <option key={f} value={f}>{f}</option>
               ))}
             </select>
+          </Field>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <Stamp className="size-4 text-muted-foreground" />
+          Watermark defaults
+        </div>
+        <div className="grid gap-4 rounded-xl border p-4 sm:grid-cols-2">
+          <Field>
+            <FieldLabel htmlFor="bk-wm-type">Default type</FieldLabel>
+            <Select
+              value={values.watermarkType ?? SYSTEM_WATERMARK_DEFAULTS.watermarkType}
+              onValueChange={(val) =>
+                onChange({ watermarkType: val as WatermarkType })
+              }
+            >
+              <SelectTrigger id="bk-wm-type">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="text">Text</SelectItem>
+                <SelectItem value="logo">Brand logo</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+
+          {(values.watermarkType ?? SYSTEM_WATERMARK_DEFAULTS.watermarkType) === "text" ? (
+            <Field>
+              <FieldLabel htmlFor="bk-wm-text">Default text</FieldLabel>
+              <Input
+                id="bk-wm-text"
+                value={values.watermarkText ?? SYSTEM_WATERMARK_DEFAULTS.watermarkText}
+                onChange={(e) => onChange({ watermarkText: e.target.value })}
+                maxLength={120}
+              />
+            </Field>
+          ) : (
+            <Field>
+              <FieldLabel>Logo watermark</FieldLabel>
+              <p className="text-xs text-muted-foreground">
+                Uses the uploaded brand logo when exports or clips request a logo watermark.
+              </p>
+            </Field>
+          )}
+
+          <Field>
+            <FieldLabel htmlFor="bk-wm-position">Default position</FieldLabel>
+            <Select
+              value={values.watermarkPosition ?? SYSTEM_WATERMARK_DEFAULTS.watermarkPosition}
+              onValueChange={(val) =>
+                onChange({ watermarkPosition: val as WatermarkPosition })
+              }
+            >
+              <SelectTrigger id="bk-wm-position">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="top-left">Top left</SelectItem>
+                <SelectItem value="top-right">Top right</SelectItem>
+                <SelectItem value="bottom-left">Bottom left</SelectItem>
+                <SelectItem value="bottom-right">Bottom right</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <Field>
+            <FieldLabel htmlFor="bk-wm-size">Default size</FieldLabel>
+            <Select
+              value={values.watermarkSize ?? SYSTEM_WATERMARK_DEFAULTS.watermarkSize}
+              onValueChange={(val) =>
+                onChange({ watermarkSize: val as WatermarkSize })
+              }
+            >
+              <SelectTrigger id="bk-wm-size">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="small">Small</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="large">Large</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <Field className="sm:col-span-2">
+            <div className="mb-2 flex items-center justify-between">
+              <FieldLabel htmlFor="bk-wm-opacity" className="mb-0">
+                Default opacity
+              </FieldLabel>
+              <span className="text-xs text-muted-foreground">
+                {Math.round(
+                  (values.watermarkOpacity ?? SYSTEM_WATERMARK_DEFAULTS.watermarkOpacity) *
+                    100,
+                )}
+                %
+              </span>
+            </div>
+            <input
+              id="bk-wm-opacity"
+              type="range"
+              min={0.1}
+              max={1}
+              step={0.05}
+              value={values.watermarkOpacity ?? SYSTEM_WATERMARK_DEFAULTS.watermarkOpacity}
+              onChange={(e) =>
+                onChange({ watermarkOpacity: Number(e.target.value) })
+              }
+              className="w-full accent-primary"
+            />
           </Field>
         </div>
       </div>

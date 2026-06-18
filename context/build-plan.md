@@ -48,7 +48,7 @@ Reference UI patterns from `sample/frontend/` for sidebar, cards, forms, async p
 - [x] 28 Caption generation (Faster-Whisper on Replicate)
 - [x] 29 Final rendering pipeline (Remotion/MoviePy on Modal)
 - [x] 30 B-roll integration (Pexels + Pixabay APIs)
-- [ ] 31 Watermark engine (free tier watermarked, paid clean)
+- [x] 31 Watermark engine (free tier forced system watermark, premium customization, brand kit defaults, clip + export pipelines)
 - [ ] 32 Real-time preview engine (15fps stream during generation)
 - [ ] 33 Team features (`/dashboard/team` — invites, roles)
 

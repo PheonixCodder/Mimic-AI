@@ -295,5 +295,12 @@ These exist in `sample/frontend/` and should be reimplemented for mimic-ai with 
 - Selected tray: `flex gap-2 overflow-x-auto pb-1 scrollbar-thin`
 - Thumbnail badges: `Badge variant="secondary" className="text-[9px] py-0 px-1.5 bg-black/60 text-white border-none backdrop-blur-sm"`
 
+### WatermarkSettingsFields
+**Path:** `features/watermark/components/watermark-settings-fields.tsx`
+**Classes:**
+- Container: `space-y-4 rounded-xl border p-4`
+- Free tier alert: `rounded-xl border border-amber-200/50 bg-amber-50/50 p-3 text-xs text-amber-800`
+- Premium badge: `rounded-xl border border-green-200/50 bg-green-50/50 p-3 text-xs text-green-800`
+- Opacity slider: `w-full accent-primary`
 
 
