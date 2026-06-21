@@ -35,11 +35,14 @@ import type { Job } from "@/trpc/routers/jobs";
 const MOCK_TITLES: Record<JobType, string[]> = {
   video_render: ["Product Demo Render", "Onboarding Tutorial", "Social Media Clip"],
   voice_clone: ["Sarah's Voice Clone", "Corporate Narrator", "Brand Ambassador"],
+  voice_validate: ["Voice Quality Analysis", "Audio Validation Check", "Voice Verification"],
   avatar_generate: ["CEO Digital Twin", "Support Agent Avatar", "Marketing Persona"],
+  avatar_validate: ["Avatar Quality Check", "Face Detection Analysis", "Image Validation"],
   video_export: ["1080p MP4 Export", "4K WebM Export", "720p Social Cut"],
   caption_generate: ["English Captions", "Multi-language Subtitles", "Accessibility Track"],
   video_preview: ["Avatar Speech Preview", "3-second Lip-sync Test", "Quick Layout Check"],
   clip_generate: ["Cinematic Sunset Clip", "Abstract Background Loop", "Nature B-roll"],
+  model_finetune: ["Brand Style LoRA", "Corporate Portrait Style", "Product Photography Model"],
 };
 
 function pickRandomTitle(type: JobType): string {
@@ -124,14 +127,6 @@ export function JobsView() {
     }),
   );
 
-  function handleSimulate() {
-    const randomType = JOB_TYPES[Math.floor(Math.random() * JOB_TYPES.length)];
-    createMockMutation.mutate({
-      type: randomType,
-      title: pickRandomTitle(randomType),
-    });
-  }
-
   // Computed stats
   const allJobs = jobs ?? [];
   const totalJobs = allJobs.length;
@@ -165,23 +160,6 @@ export function JobsView() {
             typeFilter={typeFilter}
             onTypeFilterChange={setTypeFilter}
           />
-
-          {canWrite && (
-            <Button
-              variant="default"
-              size="sm"
-              className="gap-1.5 shrink-0"
-              onClick={handleSimulate}
-              disabled={createMockMutation.isPending}
-            >
-              {createMockMutation.isPending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Zap className="size-4" />
-              )}
-              Simulate Job
-            </Button>
-          )}
         </div>
 
         {/* Job list */}

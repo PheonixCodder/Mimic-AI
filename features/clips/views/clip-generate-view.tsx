@@ -323,11 +323,6 @@ export function ClipGenerateView() {
             }
             isPremium={isPremium}
             disabled={isPending}
-            showDevSimulate={process.env.NODE_ENV === "development"}
-            onSimulateUpgrade={() => {
-              setDevPremiumOverride(true);
-              toast.success("Premium simulation enabled for clip generation.");
-            }}
             onUpgradeCheckout={() => checkoutMutation.mutate()}
             isCheckoutPending={checkoutMutation.isPending}
           />

@@ -9,6 +9,7 @@
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
+.trigger
 
 # testing
 /coverage
@@ -62,6 +63,7 @@ next-env.d.ts
 
 /heygen-clone
 /heygen-clone2
+/opengen-ai
 /sample
 
 # Python

@@ -100,9 +100,9 @@ export function ScriptEditDialog({
             <Button type="submit" form={formId}>
               Save changes
             </Button>
-            <DrawerClose asChild>
-              <Button variant="outline">Cancel</Button>
-            </DrawerClose>
+            <Button variant="outline" onClick={handleClose}>
+              Cancel
+            </Button>
           </DrawerFooter>
         </DrawerContent>
       </Drawer>

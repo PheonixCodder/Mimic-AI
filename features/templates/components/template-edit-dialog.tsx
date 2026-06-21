@@ -134,9 +134,9 @@ export function TemplateEditDialog({
           <div className="overflow-y-auto px-4 pb-2">{form}</div>
           <DrawerFooter>
             {submitButton}
-            <DrawerClose asChild>
-              <Button variant="outline">Cancel</Button>
-            </DrawerClose>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
           </DrawerFooter>
         </DrawerContent>
       </Drawer>

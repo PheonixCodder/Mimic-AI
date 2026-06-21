@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -198,7 +199,13 @@ export function BrandKitCreateDialog({ children, onSuccess }: BrandKitCreateDial
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={setOpen}>
-        {children ? <DrawerTrigger asChild>{children}</DrawerTrigger> : null}
+        {children ? (
+          <DrawerTrigger>
+            {React.cloneElement(children as React.ReactElement<any>, {
+              onClick: () => setOpen(true)
+            })}
+          </DrawerTrigger>
+        ) : null}
         <DrawerContent>
           <DrawerHeader>
             <DrawerTitle>New brand kit</DrawerTitle>
@@ -207,9 +214,9 @@ export function BrandKitCreateDialog({ children, onSuccess }: BrandKitCreateDial
           <div className="overflow-y-auto px-4 pb-2">{form}</div>
           <DrawerFooter>
             {submitButton}
-            <DrawerClose asChild>
-              <Button variant="outline">Cancel</Button>
-            </DrawerClose>
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
           </DrawerFooter>
         </DrawerContent>
       </Drawer>

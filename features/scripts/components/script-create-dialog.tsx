@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import {
   Dialog,
   DialogContent,
@@ -94,7 +95,13 @@ export function ScriptCreateDialog({
   if (isMobile) {
     return (
       <Drawer open={dialogOpen} onOpenChange={handleOpenChange}>
-        {children ? <DrawerTrigger asChild>{children}</DrawerTrigger> : null}
+        {children ? (
+          <DrawerTrigger>
+            {React.cloneElement(children as React.ReactElement<any>, {
+              onClick: () => handleOpenChange(true)
+            })}
+          </DrawerTrigger>
+        ) : null}
         <DrawerContent>
           <DrawerHeader>
             <DrawerTitle>Create script</DrawerTitle>
@@ -109,9 +116,9 @@ export function ScriptCreateDialog({
             <Button type="submit" form={FORM_ID}>
               Create script
             </Button>
-            <DrawerClose asChild>
-              <Button variant="outline">Cancel</Button>
-            </DrawerClose>
+            <Button variant="outline" onClick={handleClose}>
+              Cancel
+            </Button>
           </DrawerFooter>
         </DrawerContent>
       </Drawer>
