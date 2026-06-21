@@ -23,6 +23,7 @@ import {
   HelpCircle,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useRealtimeRun } from "@trigger.dev/react-hooks";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -194,6 +195,39 @@ export function VideoDetailView({ videoId }: VideoDetailViewProps) {
 
   const canDelete = ["owner", "admin", "member"].includes(workspace.role);
 
+  const STAGE_LABELS: Record<string, string> = {
+    starting: "Starting…",
+    validating_inputs: "Validating inputs…",
+    generating_speech: "Generating speech…",
+    rendering_avatar: "Rendering avatar…",
+    combining_tracks: "Combining tracks…",
+    uploading_r2: "Uploading result…",
+    generating_preview_speech: "Generating preview audio…",
+    rendering_preview: "Rendering preview…",
+    uploading_preview: "Uploading preview…",
+  };
+
+  const isActiveGeneration = video.status === "pending" || video.status === "processing" ||
+    video.previewStatus === "pending" || video.previewStatus === "processing";
+
+  const { data: realtimeToken } = useQuery({
+    ...trpc.videos.getRealtimeToken.queryOptions({ videoId }),
+    enabled: isActiveGeneration,
+    refetchInterval: false,
+  });
+
+  const { run: liveRun } = useRealtimeRun(realtimeToken?.runId ?? undefined, {
+    accessToken: realtimeToken?.token ?? undefined,
+    baseURL: "https://api.trigger.dev",
+    enabled: !!realtimeToken?.runId && !!realtimeToken?.token,
+    onComplete: async () => {
+      await queryClient.invalidateQueries({ queryKey: trpc.videos.getById.queryKey({ id: videoId }) });
+      await queryClient.invalidateQueries({ queryKey: trpc.jobs.list.queryKey() });
+    },
+  });
+
+  const liveStage = liveRun?.metadata?.stage as string | undefined;
+
   const deleteMutation = useMutation(
     trpc.videos.delete.mutationOptions({
       onSuccess: () => {
@@ -319,6 +353,22 @@ export function VideoDetailView({ videoId }: VideoDetailViewProps) {
 
           <VideoStatusBadge status={video.status} />
 
+          {video.approvalStatus === "approved" ? (
+            <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+              ✓ Approved
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 border border-amber-200/50">
+              Pending approval
+            </span>
+          )}
+
+          {video.consentConfirmedAt ? (
+            <span className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+              ✓ Consent confirmed
+            </span>
+          ) : null}
+
           {video.status === "completed" ? (
             <ExportDialog videoId={video.id}>
               <Button variant="default" size="sm" className="gap-1.5 ml-auto">
@@ -360,8 +410,10 @@ export function VideoDetailView({ videoId }: VideoDetailViewProps) {
                   generateMutation.isPending ||
                   generatePreviewMutation.isPending ||
                   video.previewStatus === "pending" ||
-                  video.previewStatus === "processing"
+                  video.previewStatus === "processing" ||
+                  video.approvalStatus !== "approved"
                 }
+                title={video.approvalStatus !== "approved" ? "Approve the video in the wizard first" : undefined}
               >
                 {generateMutation.isPending ? (
                   <Loader2 className="size-4 animate-spin" />
@@ -738,7 +790,9 @@ export function VideoDetailView({ videoId }: VideoDetailViewProps) {
                       <div className="flex items-center gap-2 rounded-full border bg-background px-4 py-2 text-sm text-muted-foreground shadow-sm">
                         <Loader2 className="size-4 animate-spin text-primary" />
                         <span className="capitalize">
-                          {activeJob.status === "running"
+                          {liveStage
+                            ? STAGE_LABELS[liveStage] ?? liveStage
+                            : activeJob.status === "running"
                             ? `Rendering: ${activeJob.progress}%`
                             : "Queued for generation..."}
                         </span>
@@ -769,7 +823,9 @@ export function VideoDetailView({ videoId }: VideoDetailViewProps) {
                       <div className="flex items-center gap-2 rounded-full border bg-background px-4 py-2 text-sm text-muted-foreground shadow-sm">
                         <Loader2 className="size-4 animate-spin text-primary" />
                         <span className="capitalize">
-                          {activeJob.status === "running"
+                          {liveStage
+                            ? STAGE_LABELS[liveStage] ?? liveStage
+                            : activeJob.status === "running"
                             ? `Generating preview: ${activeJob.progress}%`
                             : "Queued for preview..."}
                         </span>

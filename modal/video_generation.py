@@ -45,7 +45,7 @@ wan2_image = (
     .env({"DEBIAN_FRONTEND": "noninteractive"})
     .apt_install("ffmpeg", "git", "libgl1")
     .pip_install(
-        "torch==2.4.1",
+        "torch==2.5.1",
         "torchvision",
         "diffusers>=0.33.0",
         "transformers>=4.49.0",

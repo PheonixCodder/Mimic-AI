@@ -10,11 +10,14 @@ export type RunJobPayload = {
 type JobType =
   | "video_render"
   | "voice_clone"
+  | "voice_validate"
   | "avatar_generate"
+  | "avatar_validate"
   | "video_export"
   | "caption_generate"
   | "video_preview"
-  | "clip_generate";
+  | "clip_generate"
+  | "model_finetune";
 
 type JobStage = {
   name: string;
@@ -35,14 +38,24 @@ const STAGES: Record<JobType, JobStage[]> = {
     { name: "uploading_preview", progress: 90 },
   ],
   voice_clone: [
-    { name: "processing_audio", progress: 30 },
-    { name: "training_model", progress: 60 },
-    { name: "registering_voice", progress: 90 },
+    { name: "generating_speech", progress: 30 },
+    { name: "uploading_audio", progress: 70 },
+    { name: "completed", progress: 100 },
+  ],
+  voice_validate: [
+    { name: "downloading_audio", progress: 20 },
+    { name: "analyzing_quality", progress: 60 },
+    { name: "storing_results", progress: 90 },
   ],
   avatar_generate: [
     { name: "generating_image", progress: 40 },
     { name: "upscaling", progress: 70 },
     { name: "registering_avatar", progress: 90 },
+  ],
+  avatar_validate: [
+    { name: "downloading_image", progress: 20 },
+    { name: "analyzing_quality", progress: 60 },
+    { name: "storing_results", progress: 90 },
   ],
   video_export: [
     { name: "rendering_video", progress: 35 },
@@ -59,6 +72,12 @@ const STAGES: Record<JobType, JobStage[]> = {
     { name: "rendering_frames", progress: 65 },
     { name: "compositing", progress: 85 },
     { name: "uploading_clip", progress: 95 },
+  ],
+  model_finetune: [
+    { name: "preparing_dataset", progress: 15 },
+    { name: "uploading_images", progress: 30 },
+    { name: "training", progress: 70 },
+    { name: "saving_weights", progress: 90 },
   ],
 };
 
@@ -208,9 +227,6 @@ export const runJobTask = task({
             const errBody = await composeResponse.text().catch(() => "");
             throw new Error(`Composition API failed (${composeResponse.status}): ${errBody}`);
           }
-        } else {
-          // Simulated composition — just progress through stages
-          await delay(2000);
         }
 
         // Stage 2: applying_watermark
@@ -271,48 +287,6 @@ export const runJobTask = task({
 
           const result = await response.json();
           subtitles = result.subtitles;
-        } else {
-          // Rule-based script segmenter simulation
-          const script = video.script || "";
-          
-          // Split on sentence/phrase boundary markers
-          const rawChunks = script.split(/([.,!?\n]+)/);
-          const chunks: string[] = [];
-          let currentText = "";
-          for (const item of rawChunks) {
-            if (!item.trim()) continue;
-            if (/^[.,!?\n]+$/.test(item)) {
-              currentText += item.trim();
-              chunks.push(currentText);
-              currentText = "";
-            } else {
-              if (currentText) chunks.push(currentText);
-              currentText = item.trim();
-            }
-          }
-          if (currentText) chunks.push(currentText);
-
-          const cues = [];
-          let currentTime = 0.5;
-          for (const chunk of chunks) {
-            const trimmed = chunk.replace(/\s+/g, " ").trim();
-            if (!trimmed) continue;
-            const words = trimmed.split(" ");
-            const wordCount = words.length;
-            if (wordCount === 0) continue;
-
-            // Average reading speed: ~3 words per second (0.35s per word)
-            const duration = Math.max(1.0, wordCount * 0.35);
-            const endTime = currentTime + duration;
-            cues.push({
-              start: Math.round(currentTime * 100) / 100,
-              end: Math.round(endTime * 100) / 100,
-              text: trimmed,
-            });
-            currentTime = endTime + 0.1;
-          }
-          subtitles = cues;
-          await delay(1500);
         }
 
         // Stage 2: aligning_timestamps
@@ -456,6 +430,22 @@ export const runJobTask = task({
           throw new Error("Avatar has no associated portrait image key");
         }
 
+        // Fetch digital twin (optional — null if not configured)
+        const { data: digitalTwin } = await db.database
+          .from("digital_twins")
+          .select("speaking_style, tone, personality, vocabulary")
+          .eq("avatar_id", video.avatar_id)
+          .single();
+
+        const styleInstruction = digitalTwin
+          ? [
+              `Speaking style: ${(digitalTwin as any).speaking_style}.`,
+              `Tone: ${(digitalTwin as any).tone}.`,
+              (digitalTwin as any).personality ?? "",
+              (digitalTwin as any).vocabulary ?? "",
+            ].filter(Boolean).join(" ").trim()
+          : undefined;
+
         if (jobType === "video_render") {
           // --- FULL VIDEO RENDER ---
           
@@ -477,6 +467,7 @@ export const runJobTask = task({
             body: JSON.stringify({
               prompt: video.script,
               voice_key: voice.r2_object_key,
+              ...(styleInstruction ? { style_instruction: styleInstruction } : {}),
             }),
           });
 
@@ -608,18 +599,433 @@ export const runJobTask = task({
           await db.database.from("jobs").update({ progress: 90 }).eq("id", payload.jobId);
           await delay(1000);
         }
-      } else {
-        // Fallback simulated pipeline execution
-        const stages = STAGES[jobType] ?? [];
-        for (const stage of stages) {
-          await delay(1500);
-          metadata.set("stage", stage.name);
-          await db.database
-            .from("jobs")
-            .update({ progress: stage.progress })
-            .eq("id", payload.jobId);
+      } else if (jobType === "avatar_generate") {
+        // --- AVATAR GENERATION (Flux with optional LoRA) ---
+        const { data: avatar, error: avatarError } = await db.database
+          .from("avatars")
+          .select("model_variant_id, name, style")
+          .eq("id", job.resource_id)
+          .single();
+
+        if (avatarError || !avatar) {
+          throw new Error(`Avatar not found: ${avatarError?.message || "unknown"}`);
         }
-        await delay(1500);
+
+        // Stage 1: Preparing generation
+        metadata.set("stage", "preparing_generation");
+        await db.database.from("jobs").update({ progress: 20 }).eq("id", payload.jobId);
+
+        let loraWeightsUrl = null;
+        if (avatar.model_variant_id) {
+          const { data: modelVariant, error: mvError } = await db.database
+            .from("model_variants")
+            .select("r2_weights_key, trigger_word")
+            .eq("id", avatar.model_variant_id)
+            .single();
+
+          if (!mvError && modelVariant?.r2_weights_key) {
+            const { getPresignedDownloadUrl } = await import("../lib/r2");
+            loraWeightsUrl = await getPresignedDownloadUrl(modelVariant.r2_weights_key);
+          }
+        }
+
+        // Stage 2: Generating avatar image
+        metadata.set("stage", "generating_image");
+        await db.database.from("jobs").update({ progress: 50 }).eq("id", payload.jobId);
+
+        const response = await fetch(`${process.env.FLUX_INFERENCE_API_URL}/generate`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Api-Key": process.env.FLUX_INFERENCE_API_KEY || "",
+          },
+          body: JSON.stringify({
+            prompt: `professional portrait, ${avatar.style.toLowerCase()}, high quality`,
+            lora_weights_r2_key: loraWeightsUrl,
+            width: 768,
+            height: 1024,
+            num_inference_steps: 4,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Flux generation failed: ${response.status}`);
+        }
+
+        const result = await response.json();
+        if (result.status === "failed") {
+          throw new Error(`Image generation failed: ${result.error}`);
+        }
+
+        // Stage 3: Uploading result (already done by Modal)
+        metadata.set("stage", "uploading_result");
+        await db.database.from("jobs").update({ progress: 90 }).eq("id", payload.jobId);
+        
+        // Update avatar with generated image
+        await db.database.from("avatars").update({ 
+          r2_object_key: result.image_r2_key,
+          status: "ready" 
+        }).eq("id", job.resource_id);
+      } else if (jobType === "model_finetune") {
+        // --- MODEL FINE-TUNE (Flux LoRA via Replicate) ---
+        const { data: model, error: modelError } = await db.database
+          .from("model_variants")
+          .select("*")
+          .eq("id", job.resource_id)
+          .single();
+
+        if (modelError || !model) {
+          throw new Error(`Model variant not found: ${modelError?.message || "unknown"}`);
+        }
+
+        const mv = model as {
+          id: string; name: string; trigger_word: string | null;
+          training_images_r2_key: string | null; workspace_id: string;
+        };
+
+        // Stage 1: preparing dataset
+        metadata.set("stage", "preparing_dataset");
+        await db.database.from("jobs").update({ progress: 15 }).eq("id", payload.jobId);
+        await db.database.from("model_variants").update({ status: "training" }).eq("id", mv.id);
+        await delay(1000);
+
+        // LoRA trainer not available due to Modal workspace limits
+        throw new Error("Flux LoRA trainer service not available. Upgrade Modal workspace to deploy trainer service.");
+      } else if (jobType === "voice_clone") {
+        // --- VOICE CLONE OR VOICE VALIDATION ---
+        if (!job.metadata || typeof job.metadata !== 'object') {
+          throw new Error("Voice job missing required metadata");
+        }
+
+        // Check if this is a validation job
+        if ('auto_validation' in job.metadata) {
+          // --- VOICE VALIDATION ---
+          const validationMetadata = job.metadata as {
+            voice_id: string;
+            voice_name: string;
+            r2_object_key: string;
+            language: string;
+            auto_validation?: boolean;
+          };
+
+          metadata.set("stage", "downloading_audio");
+          await db.database.from("jobs").update({ 
+            progress: 20, 
+            metadata: { ...validationMetadata, stage: "downloading_audio" }
+          }).eq("id", payload.jobId);
+
+          const { getPresignedDownloadUrl } = await import("../lib/r2");
+          const audioUrl = await getPresignedDownloadUrl(validationMetadata.r2_object_key);
+
+          const audioResponse = await fetch(audioUrl);
+          if (!audioResponse.ok) {
+            throw new Error(`Failed to download audio: ${audioResponse.status}`);
+          }
+          const audioBuffer = await audioResponse.arrayBuffer();
+
+          metadata.set("stage", "analyzing_quality");
+          await db.database.from("jobs").update({ 
+            progress: 60,
+            metadata: { ...validationMetadata, stage: "analyzing_quality" }
+          }).eq("id", payload.jobId);
+
+          if (!process.env.VOICE_VALIDATION_API_URL) {
+            throw new Error("Voice validation service not available. API URL not configured.");
+          }
+
+          const validationResponse = await fetch(`${process.env.VOICE_VALIDATION_API_URL}/analyze`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/octet-stream",
+              "X-Api-Key": process.env.VOICE_VALIDATION_API_KEY || "",
+            },
+            body: audioBuffer,
+          });
+
+          if (!validationResponse.ok) {
+            throw new Error(`Voice validation failed: ${validationResponse.status}`);
+          }
+
+          const validationResult = await validationResponse.json();
+          if (!validationResult.success) {
+            throw new Error(validationResult.error || "Voice validation analysis failed");
+          }
+
+          metadata.set("stage", "storing_results");
+          await db.database.from("jobs").update({ 
+            progress: 90,
+            metadata: { ...validationMetadata, stage: "storing_results" }
+          }).eq("id", payload.jobId);
+
+          const updateData: any = {
+            quality_score: validationResult.quality_score,
+            validation_results: validationResult.validation_results,
+          };
+
+          if (validationMetadata.auto_validation) {
+            updateData.auto_validated_at = new Date().toISOString();
+          }
+
+          await db.database.from("voices").update(updateData).eq("id", validationMetadata.voice_id);
+          await db.database.from("jobs").update({ 
+            status: "completed",
+            resource_id: validationMetadata.voice_id,
+            resource_type: "voice",
+            progress: 100,
+            metadata: { ...validationMetadata, stage: "completed" }
+          }).eq("id", payload.jobId);
+
+          return;
+        }
+
+        // --- VOICE CLONE TTS GENERATION ---
+        if (!job.metadata || typeof job.metadata !== 'object') {
+          throw new Error("Voice clone job missing required metadata");
+        }
+
+        const voiceMetadata = job.metadata as {
+          voice_id: string;
+          voice_name: string;
+          text: string;
+          temperature?: number;
+          top_p?: number;
+          top_k?: number;
+          repetition_penalty?: number;
+          voice_r2_key?: string;
+        };
+
+        if (!voiceMetadata.voice_r2_key) {
+          const { data: voice, error: voiceError } = await db.database
+            .from("voices")
+            .select("r2_object_key")
+            .eq("id", voiceMetadata.voice_id)
+            .single();
+
+          if (voiceError || !voice?.r2_object_key) {
+            throw new Error("Voice reference audio not available");
+          }
+          voiceMetadata.voice_r2_key = voice.r2_object_key;
+        }
+
+        const s3Client = new S3Client({
+          region: "auto",
+          endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+          credentials: {
+            accessKeyId: process.env.R2_ACCESS_KEY_ID!.trim(),
+            secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!.trim(),
+          },
+        });
+
+        metadata.set("stage", "generating_speech");
+        await db.database.from("jobs").update({ progress: 30 }).eq("id", payload.jobId);
+
+        const ttsResponse = await fetch(`${process.env.CHATTERBOX_API_URL}/generate`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Api-Key": process.env.CHATTERBOX_API_KEY || "",
+          },
+          body: JSON.stringify({
+            prompt: voiceMetadata.text,
+            voice_key: voiceMetadata.voice_r2_key,
+            temperature: voiceMetadata.temperature ?? 0.8,
+            top_p: voiceMetadata.top_p ?? 0.95,
+            top_k: voiceMetadata.top_k ?? 1000,
+            repetition_penalty: voiceMetadata.repetition_penalty ?? 1.2,
+            norm_loudness: true,
+          }),
+        });
+
+        if (!ttsResponse.ok) {
+          const status = ttsResponse.status;
+          const errorMessage = status === 400 || status === 403
+            ? "Voice reference audio is unavailable"
+            : `TTS generation failed with status ${status}`;
+          throw new Error(errorMessage);
+        }
+
+        metadata.set("stage", "uploading_audio");
+        await db.database.from("jobs").update({ progress: 70 }).eq("id", payload.jobId);
+
+        const audioBuffer = Buffer.from(await ttsResponse.arrayBuffer());
+        const audioKey = `tts/${job.workspace_id}/${job.id}.wav`;
+
+        await s3Client.send(
+          new PutObjectCommand({
+            Bucket: process.env.R2_BUCKET_NAME!,
+            Key: audioKey,
+            Body: audioBuffer,
+            ContentType: "audio/wav",
+          }),
+        );
+
+        await db.database.from("jobs").update({ 
+          status: "completed",
+          resource_id: audioKey,
+          resource_type: "audio",
+          progress: 100 
+        }).eq("id", payload.jobId);
+      } else if (jobType === "voice_validate") {
+        // --- VOICE VALIDATION ---
+        if (!job.metadata || typeof job.metadata !== 'object') {
+          throw new Error("Voice validation job missing required metadata");
+        }
+
+        const validationMetadata = job.metadata as {
+          voice_id: string;
+          voice_name: string;
+          r2_object_key: string;
+          language: string;
+          auto_validation?: boolean;
+        };
+
+        metadata.set("stage", "downloading_audio");
+        await db.database.from("jobs").update({ 
+          progress: 20, 
+          metadata: { ...validationMetadata, stage: "downloading_audio" }
+        }).eq("id", payload.jobId);
+
+        const { getPresignedDownloadUrl } = await import("../lib/r2");
+        const audioUrl = await getPresignedDownloadUrl(validationMetadata.r2_object_key);
+
+        const audioResponse = await fetch(audioUrl);
+        if (!audioResponse.ok) {
+          throw new Error(`Failed to download audio: ${audioResponse.status}`);
+        }
+        const audioBuffer = await audioResponse.arrayBuffer();
+
+        metadata.set("stage", "analyzing_quality");
+        await db.database.from("jobs").update({ 
+          progress: 60,
+          metadata: { ...validationMetadata, stage: "analyzing_quality" }
+        }).eq("id", payload.jobId);
+
+        if (!process.env.VOICE_VALIDATION_API_URL) {
+          throw new Error("Voice validation service not available. API URL not configured.");
+        }
+
+        const validationResponse = await fetch(`${process.env.VOICE_VALIDATION_API_URL}/analyze`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/octet-stream",
+            "X-Api-Key": process.env.VOICE_VALIDATION_API_KEY || "",
+          },
+          body: audioBuffer,
+        });
+
+        if (!validationResponse.ok) {
+          throw new Error(`Voice validation failed: ${validationResponse.status}`);
+        }
+
+        const validationResult = await validationResponse.json();
+        if (!validationResult.success) {
+          throw new Error(validationResult.error || "Voice validation analysis failed");
+        }
+
+        metadata.set("stage", "storing_results");
+        await db.database.from("jobs").update({ 
+          progress: 90,
+          metadata: { ...validationMetadata, stage: "storing_results" }
+        }).eq("id", payload.jobId);
+
+        const updateData: any = {
+          quality_score: validationResult.quality_score,
+          validation_results: validationResult.validation_results,
+        };
+
+        if (validationMetadata.auto_validation) {
+          updateData.auto_validated_at = new Date().toISOString();
+        }
+
+        await db.database.from("voices").update(updateData).eq("id", validationMetadata.voice_id);
+        await db.database.from("jobs").update({ 
+          status: "completed",
+          resource_id: validationMetadata.voice_id,
+          resource_type: "voice",
+          progress: 100,
+          metadata: { ...validationMetadata, stage: "completed" }
+        }).eq("id", payload.jobId);
+      } else if (jobType === "avatar_validate") {
+        // --- AVATAR VALIDATION ---
+        if (!job.metadata || typeof job.metadata !== 'object') {
+          throw new Error("Avatar validation job missing required metadata");
+        }
+
+        const validationMetadata = job.metadata as {
+          avatar_id: string;
+          avatar_name: string;
+          r2_object_key: string;
+          auto_validation?: boolean;
+        };
+
+        metadata.set("stage", "downloading_image");
+        await db.database.from("jobs").update({ 
+          progress: 20,
+          metadata: { ...validationMetadata, stage: "downloading_image" }
+        }).eq("id", payload.jobId);
+
+        const { getPresignedDownloadUrl } = await import("../lib/r2");
+        const imageUrl = await getPresignedDownloadUrl(validationMetadata.r2_object_key);
+
+        const imageResponse = await fetch(imageUrl);
+        if (!imageResponse.ok) {
+          throw new Error(`Failed to download image: ${imageResponse.status}`);
+        }
+        const imageBuffer = await imageResponse.arrayBuffer();
+
+        metadata.set("stage", "analyzing_quality");
+        await db.database.from("jobs").update({ 
+          progress: 60,
+          metadata: { ...validationMetadata, stage: "analyzing_quality" }
+        }).eq("id", payload.jobId);
+
+        if (!process.env.AVATAR_VALIDATION_API_URL) {
+          throw new Error("Avatar validation service not available. API URL not configured.");
+        }
+
+        const validationResponse = await fetch(`${process.env.AVATAR_VALIDATION_API_URL}/analyze`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/octet-stream",
+            "X-Api-Key": process.env.AVATAR_VALIDATION_API_KEY || "",
+          },
+          body: imageBuffer,
+        });
+
+        if (!validationResponse.ok) {
+          throw new Error(`Avatar validation failed: ${validationResponse.status}`);
+        }
+
+        const validationResult = await validationResponse.json();
+        if (!validationResult.success) {
+          throw new Error(validationResult.error || "Avatar validation analysis failed");
+        }
+
+        metadata.set("stage", "storing_results");
+        await db.database.from("jobs").update({ 
+          progress: 90,
+          metadata: { ...validationMetadata, stage: "storing_results" }
+        }).eq("id", payload.jobId);
+
+        const updateData: any = {
+          readiness_score: validationResult.readiness_score,
+          validation_results: validationResult.validation_results,
+        };
+
+        if (validationMetadata.auto_validation) {
+          updateData.auto_validated_at = new Date().toISOString();
+        }
+
+        await db.database.from("avatars").update(updateData).eq("id", validationMetadata.avatar_id);
+        await db.database.from("jobs").update({ 
+          status: "completed",
+          resource_id: validationMetadata.avatar_id,
+          resource_type: "avatar",
+          progress: 100,
+          metadata: { ...validationMetadata, stage: "completed" }
+        }).eq("id", payload.jobId);
+      } else {
+        throw new Error(`Unsupported job type: ${jobType}. All job types must have proper Modal API handlers.`);
       }
     } catch (err: any) {
       logger.error("Job execution failed", { jobId: payload.jobId, error: err });
@@ -672,6 +1078,11 @@ export const runJobTask = task({
               subtitles_error: errorMessage,
             })
             .eq("id", job.resource_id);
+        } else if (jobType === "model_finetune") {
+          await db.database
+            .from("model_variants")
+            .update({ status: "failed", error_message: errorMessage })
+            .eq("id", job.resource_id);
         }
       }
 
@@ -697,41 +1108,6 @@ export const runJobTask = task({
 
     const endTime = Date.now();
     const durationMs = endTime - startTime;
-
-    // 4. Handle voice clone simulated failure
-    if (jobType === "voice_clone") {
-      const errorMessage = "Mock failure: voice clone pipeline not configured";
-
-      await db.database
-        .from("jobs")
-        .update({
-          status: "failed",
-          error_message: errorMessage,
-          completed_at: new Date().toISOString(),
-          duration_ms: durationMs,
-        })
-        .eq("id", payload.jobId);
-
-      await tasks.trigger("send-webhook", {
-        workspaceId: job.workspace_id,
-        event: "job.failed",
-        payload: {
-          jobId: job.id,
-          type: job.type,
-          title: job.title,
-          status: "failed",
-          progress: job.progress,
-          errorMessage,
-          durationMs,
-          resourceId: job.resource_id,
-          resourceType: job.resource_type,
-        },
-      });
-
-      metadata.set("stage", "failed");
-      logger.warn("Simulated failure for voice clone job", { jobId: payload.jobId });
-      return { success: false, error: errorMessage };
-    }
 
     // 5. Synchronize specialized tables on completion
     // Note: video_export record is updated inside the execution block above

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { AlertCircle, Clapperboard, Eye, Pause, Play, Plus, Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -182,12 +182,14 @@ function VideoWizardInner({
 }: VideoWizardInnerProps) {
   const router = useRouter();
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const [step, setStep] = useState(initialStep);
   const [state, setState] = useState<WizardState>({
     ...initialState,
     ...initialOverrides,
   });
   const [draftVideoId, setDraftVideoId] = useState<string | null>(null);
+  const [currentEstimate, setCurrentEstimate] = useState<{ total: number; formattedTotal: string } | null>(null);
 
   const { data: projects } = useSuspenseQuery(trpc.projects.list.queryOptions());
   const { data: scripts } = useSuspenseQuery(trpc.scripts.list.queryOptions({}));
@@ -202,6 +204,14 @@ function VideoWizardInner({
   );
 
   const canWrite = ["owner", "admin", "member"].includes(workspace.role);
+
+  const { data: billingStatus } = useQuery({
+    ...trpc.billing.getStatus.queryOptions(),
+    enabled: step === 5,
+  });
+
+  const hasInsufficientBalance =
+    step === 5 && billingStatus != null && !billingStatus.hasActiveSubscription;
 
   const allVoices = useMemo(
     () => [...voicesData.custom, ...voicesData.system],
@@ -261,6 +271,22 @@ function VideoWizardInner({
     }),
   );
 
+  const approveMutation = useMutation(
+    trpc.videos.approve.mutationOptions({
+      onSuccess: () => {
+        // Invalidate the video cache to reflect the approval status
+        queryClient.invalidateQueries({
+          queryKey: trpc.videos.getById.queryKey({ id: draftVideoId! }),
+        });
+      },
+      onError: (error) => {
+        toast.error(error.message ?? "Failed to approve video");
+      },
+    }),
+  );
+
+  const previewCompleted = draftVideo?.previewStatus === "completed";
+
   async function handleGeneratePreview() {
     let currentVideoId = draftVideoId;
 
@@ -278,6 +304,7 @@ function VideoWizardInner({
           projectId: state.projectId,
           aspectRatio: state.aspectRatio,
           resolution: state.resolution,
+          estimatedCost: currentEstimate as Record<string, unknown> | null,
         });
 
         currentVideoId = video.id;
@@ -294,9 +321,14 @@ function VideoWizardInner({
     }
   }
 
-  function handleSaveDraftOrRedirect() {
+  async function handleSaveDraftOrRedirect() {
     if (draftVideoId) {
-      toast.success("Video draft saved");
+      try {
+        await approveMutation.mutateAsync({ id: draftVideoId, consentConfirmed: true });
+      } catch {
+        return; // error already toasted
+      }
+      toast.success("Video approved!");
       router.push(`/dashboard/videos/${draftVideoId}`);
     } else {
       handleSaveDraft();
@@ -367,6 +399,7 @@ function VideoWizardInner({
       projectId: state.projectId,
       aspectRatio: state.aspectRatio,
       resolution: state.resolution,
+      estimatedCost: currentEstimate as Record<string, unknown> | null,
     });
   }
 
@@ -479,6 +512,7 @@ function VideoWizardInner({
                   voices={allVoices}
                   value={state.voiceId}
                   onChange={(voiceId) => updateState({ voiceId })}
+                  currentScript={selectedScript?.content}
                 />
               </CardContent>
             </Card>
@@ -623,8 +657,12 @@ function VideoWizardInner({
             </Card>
 
             <CostEstimatePanel
-              scriptLength={selectedScript?.characterCount ?? 0}
+              script={selectedScript?.content ?? ""}
+              voiceId={state.voiceId ?? ""}
+              avatarId={state.avatarId ?? ""}
               resolution={state.resolution}
+              includeCaptions={true}
+              onEstimateReady={setCurrentEstimate}
             />
 
             <div className="grid gap-4 sm:grid-cols-3">
@@ -676,8 +714,7 @@ function VideoWizardInner({
                 className="mt-0.5 size-4 rounded border-input"
               />
               <span className="text-muted-foreground">
-                I confirm I have rights to use the selected voice and avatar
-                assets. (UI only — enforcement comes in Phase 0.)
+                I confirm I have the rights to use the selected voice and avatar assets.
               </span>
             </label>
           </div>
@@ -698,13 +735,32 @@ function VideoWizardInner({
               Continue
             </Button>
           ) : (
-            <Button
-              type="button"
-              onClick={handleSaveDraftOrRedirect}
-              disabled={createMutation.isPending}
-            >
-              {createMutation.isPending ? "Saving..." : "Save draft"}
-            </Button>
+            <div className="flex flex-1 flex-col items-end gap-3">
+              {hasInsufficientBalance && (
+                <div className="w-full rounded-xl border border-amber-200/50 bg-amber-50/50 p-3 text-xs text-amber-800">
+                  Insufficient credits — <a href="/dashboard/billing" className="underline underline-offset-2">add credits to continue</a>.
+                </div>
+              )}
+              {draftVideoId && !previewCompleted && (
+                <div className="w-full rounded-xl border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+                  Generate the talking preview above to enable approval.
+                </div>
+              )}
+              <Button
+                type="button"
+                onClick={handleSaveDraftOrRedirect}
+                disabled={
+                  createMutation.isPending ||
+                  approveMutation.isPending ||
+                  !state.consentChecked ||
+                  hasInsufficientBalance ||
+                  currentEstimate === null ||
+                  (draftVideoId !== null && !previewCompleted)
+                }
+              >
+                {createMutation.isPending || approveMutation.isPending ? "Saving..." : "Approve & Save draft"}
+              </Button>
+            </div>
           )}
         </div>
       </div>

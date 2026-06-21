@@ -51,6 +51,19 @@ export function AvatarPicker({ avatars, value, onChange }: AvatarPickerProps) {
               <p className="truncate text-[11px] text-muted-foreground">
                 {styleLabel}
               </p>
+              {avatar.variant === "custom" && (
+                <p className={`text-[10px] font-medium ${
+                  avatar.readinessScore === null
+                    ? "text-muted-foreground"
+                    : avatar.readinessScore >= 0.6
+                    ? "text-primary"
+                    : "text-amber-600"
+                }`}>
+                  {avatar.readinessScore === null
+                    ? "Not validated"
+                    : `${Math.round(avatar.readinessScore * 100)}%`}
+                </p>
+              )}
             </div>
           </button>
         );

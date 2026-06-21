@@ -52,7 +52,7 @@ moviepy_image = (
 )
 
 import os as _os
-VIDEO_COMP_MODE = _os.environ.get("VIDEO_COMP_MODE", "simulate")
+VIDEO_COMP_MODE = _os.environ.get("VIDEO_COMP_MODE", "moviepy")
 active_image = moviepy_image if VIDEO_COMP_MODE == "moviepy" else simulate_image
 
 app = modal.App("mimic-video-composition", image=active_image)

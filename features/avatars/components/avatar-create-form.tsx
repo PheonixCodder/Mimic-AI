@@ -5,7 +5,7 @@ import { z } from "zod";
 import { toast } from "sonner";
 import { useForm } from "@tanstack/react-form";
 import { useDropzone } from "react-dropzone";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import {
   AlignLeft,
   FolderOpen,
@@ -43,6 +43,7 @@ const avatarCreateFormSchema = z.object({
   style: z.string().min(1, "A style is required"),
   description: z.string(),
   removeBackground: z.boolean(),
+  modelVariantId: z.string().nullable(),
 });
 
 function ImageDropzone({
@@ -160,6 +161,7 @@ export function AvatarCreateForm({
 }: AvatarCreateFormProps) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const { data: readyModels = [] } = useSuspenseQuery(trpc.modelVariants.getReady.queryOptions());
 
   const createMutation = useMutation({
     mutationFn: async ({
@@ -168,23 +170,19 @@ export function AvatarCreateForm({
       style,
       description,
       removeBackground,
+      modelVariantId,
     }: {
       name: string;
       file: File;
       style: string;
       description?: string;
       removeBackground?: boolean;
+      modelVariantId?: string | null;
     }) => {
-      const params = new URLSearchParams({
-        name,
-        style,
-      });
-      if (description) {
-        params.set("description", description);
-      }
-      if (removeBackground) {
-        params.set("removeBackground", "true");
-      }
+      const params = new URLSearchParams({ name, style });
+      if (description) params.set("description", description);
+      if (removeBackground) params.set("removeBackground", "true");
+      if (modelVariantId) params.set("modelVariantId", modelVariantId);
 
       const response = await fetch(`/api/avatars/create?${params.toString()}`, {
         method: "POST",
@@ -211,6 +209,7 @@ export function AvatarCreateForm({
       style: "PROFESSIONAL" as string,
       description: "",
       removeBackground: false,
+      modelVariantId: null as string | null,
     },
     validators: {
       onSubmit: avatarCreateFormSchema,
@@ -223,6 +222,7 @@ export function AvatarCreateForm({
           style: value.style,
           description: value.description || undefined,
           removeBackground: value.removeBackground,
+          modelVariantId: value.modelVariantId ?? null,
         });
 
         toast.success("Avatar created successfully!");
@@ -339,6 +339,62 @@ export function AvatarCreateForm({
               </Field>
             );
           }}
+        </form.Field>
+
+        <form.Field name="modelVariantId">
+          {(field) => (
+            <Field>
+              <div className="relative flex items-center">
+                <div className="pointer-events-none absolute left-0 z-10 flex h-full w-11 items-center justify-center">
+                  <UserRound className="size-4 text-muted-foreground" />
+                </div>
+                <Select
+                  value={field.state.value ?? ""}
+                  onValueChange={field.handleChange}
+                >
+                  <SelectTrigger className="w-full pl-10">
+                    <SelectValue placeholder="Custom style (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Default Flux model</SelectItem>
+                    {readyModels.map((model) => (
+                      <SelectItem key={model.id} value={model.id}>
+                        {model.name} ({model.trigger_word})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </Field>
+          )}
+        </form.Field>
+
+        <form.Field name="modelVariantId">
+          {(field) => (
+            <Field>
+              <div className="relative flex items-center">
+                <div className="pointer-events-none absolute left-0 z-10 flex h-full w-11 items-center justify-center">
+                  <UserRound className="size-4 text-muted-foreground" />
+                </div>
+                <Select
+                  value={field.state.value ?? ""}
+                  onValueChange={field.handleChange}
+                >
+                  <SelectTrigger className="w-full pl-10">
+                    <SelectValue placeholder="Custom style (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Default Flux model</SelectItem>
+                    {readyModels.map((model) => (
+                      <SelectItem key={model.id} value={model.id}>
+                        {model.name} ({model.trigger_word})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </Field>
+          )}
         </form.Field>
 
         <form.Field name="description">

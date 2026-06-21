@@ -18,10 +18,10 @@ export async function POST(request: Request) {
     const url = new URL(request.url);
 
     const validation = voiceCreateMetadataSchema.safeParse({
-      name: url.searchParams.get("name"),
-      category: url.searchParams.get("category"),
-      language: url.searchParams.get("language"),
-      description: url.searchParams.get("description"),
+      name: url.searchParams.get("name") ?? undefined,
+      category: url.searchParams.get("category") ?? undefined,
+      language: url.searchParams.get("language") ?? undefined,
+      description: url.searchParams.get("description") ?? undefined,
     });
 
     if (!validation.success) {
@@ -164,6 +164,42 @@ export async function POST(request: Request) {
       .catch((err) =>
         console.warn("[Polar] voice_clone meter ingest failed:", err),
       );
+
+    // Trigger automatic voice validation - fire-and-forget
+    try {
+      const { tasks } = await import("@trigger.dev/sdk/v3");
+      
+      // Create validation job in database
+      const { data: validationJob } = await session.insforge.database
+        .from("jobs")
+        .insert({
+          workspace_id: session.workspaceId,
+          created_by: session.userId,
+          type: "voice_validate",
+          title: `Auto-validate: ${name}`,
+          resource_id: voiceId,
+          resource_type: "voice",
+          status: "queued",
+          progress: 0,
+          metadata: {
+            voice_id: voiceId,
+            voice_name: name,
+            r2_object_key: r2ObjectKey,
+            language,
+            auto_validation: true,
+          },
+        })
+        .select("id")
+        .single();
+
+      if (validationJob) {
+        // Trigger the validation job
+        await tasks.trigger("run-job", { jobId: validationJob.id });
+      }
+    } catch (err) {
+      console.warn("[Voice Validation] Auto-validation trigger failed:", err);
+      // Don't block voice creation if validation trigger fails
+    }
 
     return NextResponse.json(
       { name, message: "Voice created successfully" },

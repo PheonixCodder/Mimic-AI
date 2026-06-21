@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import {
   Dialog,
   DialogContent,
@@ -38,7 +39,11 @@ export function AvatarCreateDialog({
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={onOpenChange}>
-        {children ? <DrawerTrigger asChild>{children}</DrawerTrigger> : null}
+        {children ? (
+          <DrawerTrigger asChild>
+            {children}
+          </DrawerTrigger>
+        ) : null}
         <DrawerContent>
           <DrawerHeader>
             <DrawerTitle>Create custom avatar</DrawerTitle>
@@ -52,9 +57,9 @@ export function AvatarCreateDialog({
             footer={(submit) => (
               <DrawerFooter>
                 {submit}
-                <DrawerClose asChild>
-                  <Button variant="outline">Cancel</Button>
-                </DrawerClose>
+                <Button variant="outline" onClick={() => onOpenChange?.(false)}>
+                  Cancel
+                </Button>
               </DrawerFooter>
             )}
           />

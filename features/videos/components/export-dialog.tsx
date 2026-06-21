@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -157,11 +158,6 @@ export function ExportDialog({ videoId, children, onSuccess }: ExportDialogProps
           }
           isPremium={isPremium}
           disabled={exportMutation.isPending}
-          showDevSimulate={process.env.NODE_ENV === "development"}
-          onSimulateUpgrade={() => {
-            setDevPremiumOverride(true);
-            toast.success("Premium simulation enabled for this export dialog.");
-          }}
           onUpgradeCheckout={() => checkoutMutation.mutate()}
           isCheckoutPending={checkoutMutation.isPending}
         />
@@ -172,7 +168,13 @@ export function ExportDialog({ videoId, children, onSuccess }: ExportDialogProps
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={setOpen}>
-        {children ? <DrawerTrigger asChild>{children}</DrawerTrigger> : null}
+        {children ? (
+          <DrawerTrigger>
+            {React.cloneElement(children as React.ReactElement<any>, {
+              onClick: () => setOpen(true)
+            })}
+          </DrawerTrigger>
+        ) : null}
         <DrawerContent>
           <DrawerHeader>
             <DrawerTitle>Export Video</DrawerTitle>
@@ -199,11 +201,9 @@ export function ExportDialog({ videoId, children, onSuccess }: ExportDialogProps
                 </>
               )}
             </Button>
-            <DrawerClose asChild>
-              <Button variant="outline" className="w-full">
+              <Button variant="outline" className="w-full" onClick={() => setOpen(false)}>
                 Cancel
               </Button>
-            </DrawerClose>
           </DrawerFooter>
         </DrawerContent>
       </Drawer>

@@ -57,7 +57,7 @@ whisper_image = (
 )
 
 import os as _os
-CAPTION_GEN_MODE = _os.environ.get("CAPTION_GEN_MODE", "simulate")
+CAPTION_GEN_MODE = _os.environ.get("CAPTION_GEN_MODE", "whisper")
 active_image = whisper_image if CAPTION_GEN_MODE == "whisper" else simulate_image
 
 app = modal.App("mimic-caption-generation", image=active_image)

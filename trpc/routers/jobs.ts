@@ -2,7 +2,12 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { tasks } from "@trigger.dev/sdk/v3";
 
-import { JOB_STATUSES, JOB_TYPES, type JobRow } from "@/features/jobs/lib/schemas";
+import { 
+  JOB_STATUSES, 
+  JOB_TYPES, 
+  type JobRow, 
+  voiceCloneMetadataSchema 
+} from "@/features/jobs/lib/schemas";
 import { createTRPCRouter, workspaceProcedure } from "../init";
 
 const jobIdSchema = z.object({
@@ -42,6 +47,8 @@ function mapJob(row: JobRow) {
     completedAt: row.completed_at,
     errorMessage: row.error_message,
     durationMs: row.duration_ms,
+    triggerRunId: row.trigger_run_id ?? null,
+    metadata: row.metadata,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -265,6 +272,114 @@ export const jobsRouter = createTRPCRouter({
       }
 
       return { success: true };
+    }),
+
+  createTTS: workspaceProcedure
+    .input(
+      z.object({
+        text: z.string().min(1).max(10000),
+        voiceId: z.string().uuid(),
+        temperature: z.number().min(0).max(2).default(0.8),
+        topP: z.number().min(0).max(1).default(0.95),
+        topK: z.number().min(1).max(10000).default(1000),
+        repetitionPenalty: z.number().min(1).max(2).default(1.2),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      assertCanWrite(ctx.role);
+
+      // Validate voice exists and is accessible
+      const { data: voice, error: voiceError } = await ctx.insforge.database
+        .from("voices")
+        .select("id, name, r2_object_key, variant, quality_score")
+        .eq("id", input.voiceId)
+        .or(`workspace_id.eq.${ctx.workspace.id},variant.eq.system`)
+        .single();
+
+      if (voiceError || !voice) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Voice not found or not accessible",
+        });
+      }
+
+      if (!voice.r2_object_key) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Voice audio not available",
+        });
+      }
+
+      // Check voice quality for custom voices
+      if (voice.variant === "custom") {
+        if (voice.quality_score === null) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Voice has not been validated yet. Please validate the voice before generating TTS.",
+          });
+        }
+
+        if (voice.quality_score < 0.4) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Voice quality is too low for TTS generation. Please improve or re-upload the voice.",
+          });
+        }
+      }
+
+      const metadata = {
+        voice_id: input.voiceId,
+        voice_name: voice.name,
+        text: input.text,
+        temperature: input.temperature,
+        top_p: input.topP,
+        top_k: input.topK,
+        repetition_penalty: input.repetitionPenalty,
+        voice_r2_key: voice.r2_object_key,
+      };
+
+      const { data, error } = await ctx.insforge.database
+        .from("jobs")
+        .insert([
+          {
+            workspace_id: ctx.workspace.id,
+            created_by: ctx.user.id,
+            type: "voice_clone",
+            title: `TTS: ${input.text.substring(0, 50)}${input.text.length > 50 ? '...' : ''}`,
+            status: "queued",
+            progress: 0,
+            metadata,
+          },
+        ])
+        .select()
+        .single();
+
+      if (error || !data) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: error?.message ?? "Failed to create TTS job",
+        });
+      }
+
+      const createdJob = data as JobRow;
+
+      await tasks.trigger("send-webhook", {
+        workspaceId: ctx.workspace.id,
+        event: "job.queued",
+        payload: {
+          jobId: createdJob.id,
+          type: createdJob.type,
+          title: createdJob.title,
+          status: "queued",
+          progress: 0,
+          resourceId: createdJob.resource_id,
+          resourceType: createdJob.resource_type,
+        },
+      });
+
+      await tasks.trigger("run-job", { jobId: createdJob.id });
+
+      return mapJob(createdJob);
     }),
 
   createMock: workspaceProcedure

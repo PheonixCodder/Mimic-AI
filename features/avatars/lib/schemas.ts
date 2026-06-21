@@ -11,6 +11,7 @@ export const avatarCreateMetadataSchema = z.object({
     .max(2000)
     .optional()
     .transform((value) => (value && value.length > 0 ? value : null)),
+  modelVariantId: z.string().uuid().optional().nullable(),
 });
 
 export type AvatarRow = {
@@ -24,6 +25,9 @@ export type AvatarRow = {
   r2_object_key: string | null;
   status: string;
   readiness_score: number | null;
+  validation_results: Record<string, any> | null;
+  auto_validated_at: string | null;
+  model_variant_id: string | null;
   created_at: string;
   updated_at: string;
 };

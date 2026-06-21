@@ -14,6 +14,7 @@ export const videoCreateSchema = z.object({
   projectId: z.string().uuid().optional().nullable(),
   aspectRatio: z.enum(VIDEO_ASPECT_RATIOS),
   resolution: z.enum(VIDEO_RESOLUTIONS),
+  estimatedCost: z.record(z.string(), z.unknown()).optional().nullable(),
 });
 
 export interface BRollClip {
@@ -50,6 +51,10 @@ export type VideoRow = {
   subtitles_error: string | null;
   subtitles: { start: number; end: number; text: string }[] | null;
   broll_clips?: BRollClip[] | null;
+  estimated_cost: Record<string, unknown> | null;
+  approval_status: string;
+  approved_at: string | null;
+  consent_confirmed_at: string | null;
   created_at: string;
   updated_at: string;
 };

@@ -45,29 +45,9 @@ r2_bucket = modal.CloudBucketMount(
 hallo3_volume = modal.Volume.from_name("hallo3-cache", create_if_missing=True)
 
 
-def download_hallo3_models():
-    from huggingface_hub import snapshot_download
-
-    snapshot_download(
-        "fudan-generative-ai/hallo3",
-        local_dir="/models/pretrained_models",
-        ignore_patterns=[],
-    )
-
-
 # ---------------------------------------------------------------------------
 # Images
 # ---------------------------------------------------------------------------
-simulate_image = modal.Image.debian_slim(python_version="3.12").apt_install(
-    "ffmpeg",
-).pip_install(
-    "opencv-python-headless",
-    "numpy",
-    "pydub",
-    "pillow",
-    "fastapi[standard]",
-)
-
 hallo3_image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.1.1-devel-ubuntu22.04", add_python="3.11"
@@ -87,6 +67,7 @@ hallo3_image = (
         "libswresample-dev",
         "libavfilter-dev",
     )
+    .pip_install("fastapi[standard]")
     .run_commands(
         "git clone --depth 1 https://github.com/fudan-generative-vision/hallo3 /hallo3",
         "sed -i '/^pyav/d' /hallo3/requirements.txt",
@@ -94,24 +75,36 @@ hallo3_image = (
         "pip install -r /hallo3/requirements.txt",
     )
     .run_commands("ln -sfn /models/pretrained_models /hallo3/pretrained_models")
-    .run_function(download_hallo3_models, volumes={"/models": hallo3_volume})
 )
 
-# ---------------------------------------------------------------------------
-# Choose image + settings based on AVATAR_MODE
-# ---------------------------------------------------------------------------
-import os as _os  # noqa: E402  — used only at module level for mode check
+app = modal.App("mimic-talking-avatar", image=hallo3_image)
 
-AVATAR_MODE = _os.environ.get("AVATAR_MODE", "simulate")
+@app.function(
+    image=hallo3_image,
+    volumes={"/models": hallo3_volume},
+    timeout=300,  # 5 minutes timeout
+)
+def download_hallo3_models():
+    from huggingface_hub import snapshot_download
+    import os
 
-active_image = hallo3_image if AVATAR_MODE == "hallo3" else simulate_image
-
-app = modal.App("mimic-talking-avatar", image=active_image)
+    # Only download if models don't exist
+    if not os.path.exists("/models/pretrained_models/hallo3"):
+        print("[INFO] Downloading Hallo3 models...")
+        snapshot_download(
+            "fudan-generative-ai/hallo3",
+            local_dir="/models/pretrained_models",
+            ignore_patterns=["*.bin"],  # Skip large binary files
+        )
+    else:
+        print("[INFO] Hallo3 models already exist")
+    
+    print("[INFO] Model setup complete")
 
 # ---------------------------------------------------------------------------
 # Imports gated behind the active image
 # ---------------------------------------------------------------------------
-with active_image.imports():
+with hallo3_image.imports():
     import io
     import os
     import shutil
@@ -378,32 +371,18 @@ def _hallo3_generate(photo_path: str, audio_path: str, output_video_path: str, t
             shutil.rmtree(temp_dir)
 
 
-# ===================================================================
-# Modal class — Talking Avatar Server
-# ===================================================================
 _cls_kwargs: dict = dict(
     scaledown_window=60 * 5,
+    timeout=300,  # Reduced timeout
     secrets=[
         modal.Secret.from_name("cloudflare-r2"),
         modal.Secret.from_name("mimic-api-key"),
+        modal.Secret.from_name("avatar-hallo3"),
     ],
-    volumes={R2_MOUNT_PATH: r2_bucket},
+    volumes={
+        R2_MOUNT_PATH: r2_bucket,
+    },
 )
-
-if AVATAR_MODE == "hallo3":
-    _cls_kwargs.update(
-        gpu="A100-80GB",
-        timeout=2700,
-        secrets=[
-            modal.Secret.from_name("cloudflare-r2"),
-            modal.Secret.from_name("hf-token"),
-            modal.Secret.from_name("mimic-api-key"),
-        ],
-        volumes={
-            R2_MOUNT_PATH: r2_bucket,
-            "/models": hallo3_volume,
-        },
-    )
 
 
 @app.cls(**_cls_kwargs)

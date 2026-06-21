@@ -37,8 +37,6 @@ type WatermarkSettingsFieldsProps = {
   onChange: (value: Partial<WatermarkSettingsValue>) => void;
   isPremium: boolean;
   disabled?: boolean;
-  onSimulateUpgrade?: () => void;
-  showDevSimulate?: boolean;
   onUpgradeCheckout?: () => void;
   isCheckoutPending?: boolean;
 };
@@ -72,8 +70,6 @@ export function WatermarkSettingsFields({
   onChange,
   isPremium,
   disabled = false,
-  onSimulateUpgrade,
-  showDevSimulate = false,
   onUpgradeCheckout,
   isCheckoutPending = false,
 }: WatermarkSettingsFieldsProps) {
@@ -124,18 +120,6 @@ export function WatermarkSettingsFields({
                   >
                     <Sparkles className="size-3 text-amber-600 dark:text-amber-400" />
                     {isCheckoutPending ? "Opening checkout..." : "Upgrade workspace"}
-                  </Button>
-                ) : null}
-                {showDevSimulate && onSimulateUpgrade ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    onClick={onSimulateUpgrade}
-                    className="gap-1 border-amber-300 text-amber-900 hover:bg-amber-100 hover:text-amber-900 dark:border-amber-800 dark:text-amber-300 dark:hover:bg-amber-900/40"
-                  >
-                    <Sparkles className="size-3 text-amber-600 dark:text-amber-400" />
-                    Simulate premium
                   </Button>
                 ) : null}
               </div>

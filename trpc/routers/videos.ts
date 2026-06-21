@@ -1,9 +1,10 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { tasks } from "@trigger.dev/sdk/v3";
+import { tasks, auth } from "@trigger.dev/sdk/v3";
 
 import { videoCreateSchema, type VideoRow, type BRollClip } from "@/features/videos/lib/schemas";
 import { deleteObject } from "@/lib/r2";
+import { writeAuditLog } from "@/lib/audit";
 import { createTRPCRouter, workspaceProcedure } from "../init";
 
 const videoIdSchema = z.object({
@@ -39,6 +40,10 @@ function mapVideo(row: VideoRow) {
     subtitlesError: row.subtitles_error,
     subtitles: row.subtitles,
     brollClips: (row.broll_clips as any) || [],
+    estimatedCost: row.estimated_cost ?? null,
+    approvalStatus: row.approval_status,
+    approvedAt: row.approved_at ?? null,
+    consentConfirmedAt: row.consent_confirmed_at ?? null,
   };
 }
 
@@ -324,6 +329,7 @@ export const videosRouter = createTRPCRouter({
           aspect_ratio: input.aspectRatio,
           resolution: input.resolution,
           status: "draft",
+          estimated_cost: input.estimatedCost ?? null,
         })
         .select();
 
@@ -336,6 +342,7 @@ export const videosRouter = createTRPCRouter({
         });
       }
 
+      writeAuditLog({ workspaceId: ctx.workspace.id, userId: ctx.user.id, action: "video.created", resourceType: "video", resourceId: row.id });
       return mapVideo(row);
     }),
 
@@ -373,6 +380,20 @@ export const videosRouter = createTRPCRouter({
         });
       }
 
+      if (row.approval_status !== "approved") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Video must be approved before generation",
+        });
+      }
+
+      if (!row.consent_confirmed_at) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Consent must be confirmed before generation",
+        });
+      }
+
       // Update video status to pending
       const { error: updateError } = await ctx.insforge.database
         .from("videos")
@@ -399,6 +420,7 @@ export const videosRouter = createTRPCRouter({
             resource_type: "video",
             status: "queued",
             progress: 0,
+            estimated_cost: row.estimated_cost ?? null,
           },
         ])
         .select()
@@ -431,10 +453,18 @@ export const videosRouter = createTRPCRouter({
         },
       });
 
-      // Trigger background task execution
-      await tasks.trigger("run-job", { jobId: job.id });
-
-      return { success: true };
+      // Trigger background task execution with compensating rollback
+      let runHandle: { id: string };
+      try {
+        runHandle = await tasks.trigger("run-job", { jobId: job.id });
+      } catch {
+        await ctx.insforge.database.from("jobs").delete().eq("id", job.id);
+        await ctx.insforge.database.from("videos").update({ status: row.status }).eq("id", input.id);
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to start generation pipeline. Please try again." });
+      }
+      await ctx.insforge.database.from("jobs").update({ trigger_run_id: runHandle.id }).eq("id", job.id);
+      writeAuditLog({ workspaceId: ctx.workspace.id, userId: ctx.user.id, action: "video.generated", resourceType: "video", resourceId: input.id });
+      return { success: true, triggerRunId: runHandle.id };
     }),
 
   generatePreview: workspaceProcedure
@@ -513,9 +543,16 @@ export const videosRouter = createTRPCRouter({
         });
       }
 
-      await tasks.trigger("run-job", { jobId: job.id });
-
-      return { success: true };
+      let previewHandle: { id: string };
+      try {
+        previewHandle = await tasks.trigger("run-job", { jobId: job.id });
+      } catch {
+        await ctx.insforge.database.from("jobs").delete().eq("id", job.id);
+        await ctx.insforge.database.from("videos").update({ preview_status: "idle" }).eq("id", input.id);
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to start preview pipeline. Please try again." });
+      }
+      await ctx.insforge.database.from("jobs").update({ trigger_run_id: previewHandle.id }).eq("id", job.id);
+      return { success: true, triggerRunId: previewHandle.id };
     }),
 
   generateCaptions: workspaceProcedure
@@ -728,6 +765,7 @@ export const videosRouter = createTRPCRouter({
         await deleteObject(video.r2_object_key).catch(() => {});
       }
 
+      writeAuditLog({ workspaceId: ctx.workspace.id, userId: ctx.user.id, action: "video.deleted", resourceType: "video", resourceId: video.id });
       return { success: true };
     }),
 
@@ -786,6 +824,60 @@ export const videosRouter = createTRPCRouter({
         });
       }
 
+      return { success: true };
+    }),
+
+  getRealtimeToken: workspaceProcedure
+    .input(z.object({ videoId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const { data: job } = await ctx.insforge.database
+        .from("jobs")
+        .select("id, trigger_run_id, status")
+        .eq("resource_id", input.videoId)
+        .eq("workspace_id", ctx.workspace.id)
+        .in("status", ["queued", "running"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      const triggerRunId = (job as any)?.trigger_run_id as string | null | undefined;
+      if (!triggerRunId) return { token: null, runId: null };
+
+      const token = await auth.createPublicToken({
+        scopes: { read: { runs: triggerRunId } },
+        expirationTime: "4h",
+      });
+
+      return { token, runId: triggerRunId };
+    }),
+
+  approve: workspaceProcedure
+    .input(z.object({ id: z.string().uuid(), consentConfirmed: z.literal(true) }))
+    .mutation(async ({ ctx, input }) => {
+      const { data: video, error } = await ctx.insforge.database
+        .from("videos")
+        .select("id, preview_status, approval_status")
+        .eq("id", input.id)
+        .eq("workspace_id", ctx.workspace.id)
+        .single();
+
+      if (error || !video) throw new TRPCError({ code: "NOT_FOUND", message: "Video not found" });
+
+      const v = video as { id: string; preview_status: string; approval_status: string };
+
+      if (v.preview_status !== "completed") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Generate and complete the talking preview before approving" });
+      }
+
+      const now = new Date().toISOString();
+      const { error: updateError } = await ctx.insforge.database
+        .from("videos")
+        .update({ approval_status: "approved", approved_at: now, consent_confirmed_at: now })
+        .eq("id", input.id);
+
+      if (updateError) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: updateError.message });
+
+      writeAuditLog({ workspaceId: ctx.workspace.id, userId: ctx.user.id, action: "video.approved", resourceType: "video", resourceId: input.id });
       return { success: true };
     }),
 });

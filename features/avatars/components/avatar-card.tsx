@@ -1,9 +1,10 @@
 "use client";
 
-import { MoreHorizontal, Trash2, UserRound } from "lucide-react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { MoreHorizontal, Brain, ShieldCheck, Trash2, UserRound } from "lucide-react";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
+import Link from "next/link";
 
 import {
   AlertDialog,
@@ -45,6 +46,14 @@ export function AvatarCard({ avatar, canDelete = false }: AvatarCardProps) {
 
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  
+  // Get model variant info if avatar has one
+  const { data: modelVariant } = avatar.modelVariantId 
+    ? useSuspenseQuery(trpc.modelVariants.list.queryOptions())
+    : { data: [] };
+  
+  const avatarModel = modelVariant?.find(m => m.id === avatar.modelVariantId);
+
   const deleteMutation = useMutation(
     trpc.avatars.delete.mutationOptions({
       onSuccess: async () => {
@@ -74,6 +83,14 @@ export function AvatarCard({ avatar, canDelete = false }: AvatarCardProps) {
           {avatar.name}
           <span className="size-1 shrink-0 rounded-full bg-muted-foreground/50" />
           <span className="text-primary">{styleLabel}</span>
+          {avatarModel && (
+            <>
+              <span className="size-1 shrink-0 rounded-full bg-muted-foreground/50" />
+              <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
+                {avatarModel.name}
+              </span>
+            </>
+          )}
         </div>
 
         <p className="line-clamp-2 text-xs text-muted-foreground">
@@ -109,6 +126,14 @@ export function AvatarCard({ avatar, canDelete = false }: AvatarCardProps) {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuGroup>
+                <DropdownMenuItem render={<Link href={`/dashboard/avatars/${avatar.id}/validate`} />}>
+                  <ShieldCheck />
+                  Validate avatar
+                </DropdownMenuItem>
+                <DropdownMenuItem render={<Link href={`/dashboard/avatars/${avatar.id}/twin`} />}>
+                  <Brain />
+                  Configure twin
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   variant="destructive"
                   onClick={() => setShowDeleteDialog(true)}

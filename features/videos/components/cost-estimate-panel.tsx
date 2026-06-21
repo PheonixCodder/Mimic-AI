@@ -1,3 +1,8 @@
+"use client";
+
+import { useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -6,35 +11,50 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useTRPC } from "@/trpc/client";
+import type { VideoResolution } from "@/features/videos/data/video-options";
 
-const MOCK_LINE_ITEMS = [
-  { label: "Voice synthesis", amount: "$0.12" },
-  { label: "Avatar animation", amount: "$0.45" },
-  { label: "Video rendering", amount: "$0.80" },
-  { label: "Captions (optional)", amount: "$0.05" },
-];
-
-type CostEstimatePanelProps = {
-  scriptLength: number;
-  resolution: string;
+type Props = {
+  script: string;
+  voiceId: string;
+  avatarId: string;
+  resolution: VideoResolution;
+  includeCaptions?: boolean;
+  onEstimateReady?: (estimate: { total: number; formattedTotal: string }) => void;
 };
 
 export function CostEstimatePanel({
-  scriptLength,
+  script,
+  voiceId,
+  avatarId,
   resolution,
-}: CostEstimatePanelProps) {
-  const resolutionSurcharge = resolution === "4k" ? "$0.50" : "$0.00";
-  const total = "$1.42";
+  includeCaptions = true,
+  onEstimateReady,
+}: Props) {
+  const trpc = useTRPC();
+
+  const enabled = script.length > 0 && voiceId.length > 0 && avatarId.length > 0;
+
+  const { data, isPending, isError } = useQuery({
+    ...trpc.estimate.calculateDraft.queryOptions(
+      { script, voiceId, avatarId, resolution, includeCaptions },
+      { enabled },
+    ),
+    enabled,
+  });
+
+  useEffect(() => {
+    if (data) {
+      onEstimateReady?.({ total: data.total, formattedTotal: data.formattedTotal });
+    }
+  }, [data, onEstimateReady]);
 
   return (
     <div className="space-y-4 rounded-xl border p-4">
       <div>
-        <h3 className="text-sm font-semibold tracking-tight">
-          Estimated cost (preview)
-        </h3>
+        <h3 className="text-sm font-semibold tracking-tight">Estimated cost</h3>
         <p className="text-xs text-muted-foreground">
-          Mock estimate based on {scriptLength.toLocaleString()} characters.
-          Real billing connects in a later phase.
+          Calculated from your script, voice, avatar, and resolution.
         </p>
       </div>
 
@@ -46,29 +66,46 @@ export function CostEstimatePanel({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {MOCK_LINE_ITEMS.map((item) => (
-            <TableRow key={item.label}>
-              <TableCell>{item.label}</TableCell>
-              <TableCell className="text-right">{item.amount}</TableCell>
-            </TableRow>
-          ))}
-          {resolution === "4k" ? (
+          {isPending || !enabled ? (
+            <>
+              {[0, 1, 2].map((i) => (
+                <TableRow key={i}>
+                  <TableCell><Skeleton className="h-4 w-32" /></TableCell>
+                  <TableCell className="text-right"><Skeleton className="ml-auto h-4 w-16" /></TableCell>
+                </TableRow>
+              ))}
+              <TableRow>
+                <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                <TableCell className="text-right"><Skeleton className="ml-auto h-4 w-20" /></TableCell>
+              </TableRow>
+            </>
+          ) : isError ? (
             <TableRow>
-              <TableCell>4K surcharge</TableCell>
-              <TableCell className="text-right">{resolutionSurcharge}</TableCell>
+              <TableCell colSpan={2} className="text-xs text-destructive">
+                Failed to load estimate. Check your voice and avatar selection.
+              </TableCell>
             </TableRow>
-          ) : null}
-          <TableRow>
-            <TableCell className="font-medium">Estimated total</TableCell>
-            <TableCell className="text-right font-medium">{total}</TableCell>
-          </TableRow>
+          ) : (
+            <>
+              {data.lineItems.map((item) => (
+                <TableRow key={item.name}>
+                  <TableCell className="text-sm">
+                    {item.name}
+                    <span className="ml-1 text-xs text-muted-foreground">
+                      ({item.quantity} {item.unit})
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-right text-sm">{item.formattedTotal}</TableCell>
+                </TableRow>
+              ))}
+              <TableRow>
+                <TableCell className="font-medium">Estimated total</TableCell>
+                <TableCell className="text-right font-medium">{data.formattedTotal}</TableCell>
+              </TableRow>
+            </>
+          )}
         </TableBody>
       </Table>
-
-      <p className="text-xs text-muted-foreground">
-        Credits remaining and balance-after will appear here once Polar billing
-        is wired.
-      </p>
     </div>
   );
 }

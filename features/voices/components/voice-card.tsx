@@ -1,9 +1,10 @@
 "use client";
 
-import { MoreHorizontal, Pause, Play, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pause, Play, ShieldCheck, Trash2 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
+import Link from "next/link";
 
 import {
   AlertDialog,
@@ -146,6 +147,10 @@ export function VoiceCard({ voice, canDelete = false }: VoiceCardProps) {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuGroup>
+                <DropdownMenuItem render={<Link href={`/dashboard/voices/${voice.id}/validate`} />}>
+                  <ShieldCheck />
+                  Validate voice
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   variant="destructive"
                   onClick={() => setShowDeleteDialog(true)}

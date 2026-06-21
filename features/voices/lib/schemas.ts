@@ -25,6 +25,9 @@ export type VoiceRow = {
   language: string;
   r2_object_key: string | null;
   status: string;
+  quality_score: number | null;
+  validation_results: Record<string, any> | null;
+  auto_validated_at: string | null;
   created_at: string;
   updated_at: string;
 };

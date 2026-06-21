@@ -23,9 +23,10 @@ export async function POST(request: Request) {
     const url = new URL(request.url);
 
     const validation = avatarCreateMetadataSchema.safeParse({
-      name: url.searchParams.get("name"),
-      style: url.searchParams.get("style"),
-      description: url.searchParams.get("description"),
+      name: url.searchParams.get("name") ?? undefined,
+      style: url.searchParams.get("style") ?? undefined,
+      description: url.searchParams.get("description") ?? undefined,
+      modelVariantId: url.searchParams.get("modelVariantId") ?? undefined,
     });
 
     if (!validation.success) {
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
       });
     }
 
-    const { name, style, description } = validation.data;
+    const { name, style, description, modelVariantId } = validation.data;
     const fileBuffer = await request.arrayBuffer();
 
     if (!fileBuffer.byteLength) {
@@ -117,6 +118,7 @@ export async function POST(request: Request) {
           description,
           style,
           status: "ready",
+          model_variant_id: modelVariantId ?? null,
         })
         .select("id");
 
@@ -147,6 +149,40 @@ export async function POST(request: Request) {
           code: "INTERNAL_SERVER_ERROR",
           message: updateError.message,
         });
+      }
+
+      // Trigger automatic validation job
+      try {
+        const { data: validationJob } = await session.insforge.database
+          .from("jobs")
+          .insert([{
+            workspace_id: session.workspaceId,
+            created_by: session.userId,
+            type: "avatar_validate",
+            title: `Validating avatar: ${name}`,
+            resource_id: avatar.id,
+            resource_type: "avatar",
+            status: "queued",
+            progress: 0,
+            metadata: {
+              avatar_id: avatar.id,
+              avatar_name: name,
+              r2_object_key: r2ObjectKey,
+              auto_validation: true,
+            },
+          }])
+          .select("id");
+
+        if (validationJob?.[0]) {
+          // Trigger the validation job
+          const { tasks } = await import("@trigger.dev/sdk/v3");
+          await tasks.trigger("run-job", {
+            jobId: validationJob[0].id,
+          });
+        }
+      } catch (validationError) {
+        // Log but don't block avatar creation
+        console.warn("Failed to trigger automatic validation:", validationError);
       }
     } catch (error) {
       if (createdAvatarId) {

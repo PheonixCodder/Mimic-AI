@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import {
   Dialog,
   DialogContent,
@@ -38,7 +39,13 @@ export function VoiceCreateDialog({
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={onOpenChange}>
-        {children ? <DrawerTrigger asChild>{children}</DrawerTrigger> : null}
+        {children ? (
+          <DrawerTrigger>
+            {React.cloneElement(children as React.ReactElement<any>, {
+              onClick: () => onOpenChange?.(true)
+            })}
+          </DrawerTrigger>
+        ) : null}
         <DrawerContent>
           <DrawerHeader>
             <DrawerTitle>Create custom voice</DrawerTitle>
@@ -53,9 +60,9 @@ export function VoiceCreateDialog({
             footer={(submit) => (
               <DrawerFooter>
                 {submit}
-                <DrawerClose asChild>
-                  <Button variant="outline">Cancel</Button>
-                </DrawerClose>
+                <Button variant="outline" onClick={() => onOpenChange?.(false)}>
+                  Cancel
+                </Button>
               </DrawerFooter>
             )}
           />
