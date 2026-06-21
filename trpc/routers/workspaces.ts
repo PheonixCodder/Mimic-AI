@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { writeAuditLog } from "@/lib/audit";
 import { createTRPCRouter, protectedProcedure, workspaceProcedure } from "../init";
 
 type WorkspaceRow = {
@@ -170,6 +171,67 @@ export const workspacesRouter = createTRPCRouter({
       return { success: true };
     }),
 
+  create: protectedProcedure
+    .input(z.object({ name: z.string().trim().min(1).max(80) }))
+    .mutation(async ({ ctx, input }) => {
+      // 1. Create the workspace row
+      const { data: newWorkspaces, error: wsError } = await ctx.insforge.database
+        .from("workspaces")
+        .insert([{ name: input.name }])
+        .select();
+
+      if (wsError || !newWorkspaces?.[0]) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: wsError?.message ?? "Failed to create workspace",
+        });
+      }
+
+      const newWorkspace = newWorkspaces[0];
+
+      // 2. Add current user as workspace owner
+      const { error: memberError } = await ctx.insforge.database
+        .from("workspace_members")
+        .insert([
+          {
+            workspace_id: newWorkspace.id,
+            user_id: ctx.user.id,
+            role: "owner",
+          },
+        ]);
+
+      if (memberError) {
+        // Rollback created workspace
+        await ctx.insforge.database.from("workspaces").delete().eq("id", newWorkspace.id);
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: memberError.message,
+        });
+      }
+
+      // 3. Set new workspace as active
+      const { error: activeError } = await ctx.insforge.database
+        .from("profiles")
+        .update({ active_workspace_id: newWorkspace.id })
+        .eq("user_id", ctx.user.id);
+
+      if (activeError) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: activeError.message,
+        });
+      }
+
+      writeAuditLog({
+        workspaceId: newWorkspace.id,
+        userId: ctx.user.id,
+        action: "workspace.created",
+        metadata: { name: input.name },
+      });
+
+      return { workspace: newWorkspace };
+    }),
+
   /**
    * Update workspace name and/or slug — restricted to owner/admin.
    */
@@ -225,6 +287,7 @@ export const workspacesRouter = createTRPCRouter({
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
       }
 
+      writeAuditLog({ workspaceId: ctx.workspace.id, userId: ctx.user.id, action: "workspace.updated" });
       return { success: true };
     }),
 
@@ -309,6 +372,7 @@ export const workspacesRouter = createTRPCRouter({
       if (error) {
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
       }
+      writeAuditLog({ workspaceId: ctx.workspace.id, userId: ctx.user.id, action: "member.role_changed", resourceId: input.memberId });
 
       return { success: true };
     }),
@@ -349,7 +413,26 @@ export const workspacesRouter = createTRPCRouter({
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
       }
 
+      writeAuditLog({ workspaceId: ctx.workspace.id, userId: ctx.user.id, action: "member.removed", resourceId: input.memberId });
       return { success: true };
+    }),
+
+  /**
+   * Look up a user by email to get their userId for an invite.
+   */
+  findByEmail: workspaceProcedure
+    .input(z.object({ email: z.string().email() }))
+    .query(async ({ ctx, input }) => {
+      const { data } = await ctx.insforge.database
+        .from("profiles")
+        .select("user_id, display_name, email")
+        .eq("email", input.email.toLowerCase())
+        .limit(1)
+        .single();
+
+      if (!data) return null;
+      const p = data as ProfileRow;
+      return { userId: p.user_id, displayName: p.display_name, email: p.email ?? null };
     }),
 
   /**
@@ -391,6 +474,7 @@ export const workspacesRouter = createTRPCRouter({
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
       }
 
+      writeAuditLog({ workspaceId: ctx.workspace.id, userId: ctx.user.id, action: "member.added", metadata: { userId: input.userId, role: input.role } });
       return { success: true };
     }),
 });

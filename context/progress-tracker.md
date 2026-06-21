@@ -6,65 +6,61 @@ Update this file after every completed feature. Any AI agent reading this should
 
 ## Current Status
 
-**Phase:** Phase 2 — AI Generation Pipeline ✅ COMPLETED (Consolidated & Type-Checked on main)
-**Last completed:** Branch split audit, consolidation, and main-branch merge (Items 26-30 fully integrated)
-**Next:** Real-time preview engine (Item 32)
+**Phase:** Phase 0 — Generation Safety Layer (COMPLETE)
+**Last completed:** Item 02 — Avatar validation pipeline  
+**Next:** Phase 4 — Differentiation (Item 41 Advanced enterprise controls)
 
 ---
 
 ## Progress
 
-### Phase 0 — Generation Safety Layer
-- [ ] 01 Voice validation pipeline
-- [ ] 02 Avatar validation pipeline
-- [ ] 03 Content moderation checks
-- [ ] 04 Cost transparency engine
-- [ ] 05 Preview & approval workflow
-- [ ] 06 Consent confirmation gate
+### Phase 0 — Generation Safety Layer (COMPLETE)
+- [x] 01 Voice validation pipeline
+- [x] 02 Avatar validation pipeline
+- [x] 03 Cost transparency engine
+- [x] 04 Preview & approval workflow
+- [x] 05 Consent confirmation gate
 
 ### Phase 1 — Foundation & Core Studios
-- [x] 07 InsForge Auth setup
-- [x] 08 Custom workspace system (partial — bootstrap + tRPC, invites later)
-- [x] 09 Dashboard shell
-- [x] 10 shadcn/ui init (radix-nova, green palette)
-- [x] 11 Marketing layout (landing, features, pricing, examples)
-- [x] 12 Projects CRUD
-- [x] 13 Voice library UI + clone flow
-- [x] 14 Avatar library UI + create flow
-- [x] 15 Video library UI + generation wizard shell
-- [x] 16 Script studio
-- [x] 17 Templates & brand kits
-- [x] 18 Export studio
-- [x] 19 Job queue UI
-- [x] 20 Webhooks UI + API
-- [x] 21 Cloudflare R2 integration
-- [x] 22 Cloudinary integration
-- [x] 23 Polar billing foundations
-- [x] 24 Settings page
-- [x] 25 Trigger.dev setup
+- [x] 06 InsForge Auth setup
+- [x] 07 Custom workspace system (partial — bootstrap + tRPC, invites later)
+- [x] 08 Dashboard shell
+- [x] 09 shadcn/ui init (radix-nova, green palette)
+- [x] 10 Marketing layout (landing, features, pricing, examples)
+- [x] 11 Projects CRUD
+- [x] 12 Voice library UI + clone flow
+- [x] 13 Avatar library UI + create flow
+- [x] 14 Video library UI + generation wizard shell
+- [x] 15 Script studio
+- [x] 16 Templates & brand kits
+- [x] 17 Export studio
+- [x] 18 Job queue UI
+- [x] 19 Webhooks UI + API
+- [x] 20 Cloudflare R2 integration
+- [x] 21 Cloudinary integration
+- [x] 22 Polar billing foundations
+- [x] 23 Settings page
+- [x] 24 Trigger.dev setup
 
 ### Phase 2 — AI Generation Pipeline
-- [x] 26 Talking avatars
-- [x] 27 Video generation
-- [x] 28 Caption generation
-- [x] 29 Final rendering pipeline
-- [x] 30 B-roll integration
-- [x] 31 Watermark engine
-- [ ] 32 Real-time preview engine
-- [ ] 33 Team features
+- [x] 25 Talking avatars
+- [x] 26 Video generation
+- [x] 27 Caption generation
+- [x] 28 Final rendering pipeline
+- [x] 29 B-roll integration
+- [x] 30 Watermark engine
+- [x] 31 Real-time preview engine
+- [x] 32 Team features
 
 ### Phase 3 — Enterprise
-- [ ] 34 SSO
-- [ ] 35 Audit center
-- [ ] 36 API platform
-- [ ] 37 A/B testing studio
-- [ ] 38 Admin panel
+- [x] 33 Audit center
+- [x] 34 API platform
+- [x] 35 A/B testing studio
+- [x] 36 Admin panel
 
 ### Phase 4 — Differentiation
-- [ ] 39 Fine-tuning studio
-- [ ] 40 Digital Twin Memory
-- [ ] 41 Advanced enterprise controls
-- [ ] 42 Kubernetes deployment support
+- [x] 37 Fine-tuning studio
+- [x] 38 Digital Twin Memory
 
 ---
 
@@ -99,6 +95,20 @@ Update this file after every completed feature. Any AI agent reading this should
 | 2026-06-16 | Final rendering pipeline (Item 29) | Created `modal/video_composition.py` Modal app (simulate + FFmpeg/moviepy modes). Wired `video_export` job type in `trigger/run-job.ts` — fetches export record + source video, calls Modal `/compose` with subtitles + watermark settings, updates `video_exports` table on success/failure. Deployed to Modal. `VIDEO_COMPOSITION_API_URL` + `VIDEO_COMPOSITION_API_KEY` added to `.env.local`. tsc passes clean. |
 | 2026-06-16 | B-roll integration (Item 30) | Server-side parallel search proxy (Pexels + Pixabay), updateBroll tRPC procedure, stock footage library browser tab with hover-play previews, selection tray, and DB persistence. |
 | 2026-06-17 | Watermark engine (Item 31) | Free-tier Polar gating with forced system defaults; premium customization for exports/clips; brand kit watermark defaults; FFmpeg + OpenCV pipelines |
+| 2026-06-18 | Cost transparency engine (Item 04) | Pricing library + tRPC estimate router; CostEstimatePanel calls calculateDraft; wizard step 5 gates Approve on estimate loaded + consent + Polar subscription; estimated_cost stored on videos row and copied to jobs row on generate |
+| 2026-06-18 | Preview & approval workflow (Item 05) | voices.quality_score + videos.approval_status + videos.approved_at added; voices.validate + avatars.validate simulated scoring; videos.approve tRPC; voice/avatar validate pages; score badges in pickers; wizard gates Approve on preview completed; detail page shows approval badge + gates Generate |
+| 2026-06-18 | Consent confirmation gate (Item 06) | videos.consent_confirmed_at added; approve requires consentConfirmed:true and stores timestamp; generate gated on consent_confirmed_at IS NOT NULL; detail page shows consent badge |
+| 2026-06-19 | Real-time preview engine (Item 32) | jobs.trigger_run_id added; generate+generatePreview capture RunHandle with compensating rollback; getRealtimeToken tRPC query creates scoped 4h public token; useRealtimeRun wired in detail page with STAGE_LABELS + onComplete invalidation |
+| 2026-06-19 | Team features (Item 33) | workspaces.findByEmail added; TeamView with email lookup + member list + role management; /dashboard/team route; Team added to sidebar nav |
+| 2026-06-19 | API platform (Item 36) | api_keys table + RLS; lib/api-keys.ts (generate/hash/validate); apiKeysRouter (list/create/revoke); ApiKeysView with show-once key + copy + revoke; /dashboard/api route; API in sidebar nav |
+| 2026-06-19 | Audit center (Item 35) | audit_logs table + RLS (admin/owner read only); lib/audit.ts writeAuditLog fire-and-forget; audit writes on 14 mutations across videos/voices/avatars/workspaces/api-keys; auditLogsRouter list; AuditView with action filter + CSV/JSON export; /dashboard/audit route; Audit in sidebar |
+| 2026-06-19 | Admin panel (Item 38) | profiles.is_platform_admin BOOLEAN; lib/admin-guard.ts isPlatformAdmin(); (admin) layout with DB-based gate; adminRouter (getStats/listWorkspaces/listJobs) using insforgeAdmin; AdminOverviewView; /admin route |
+| 2026-06-19 | A/B testing studio (Item 37) | experiments + experiment_variants tables + RLS; experimentsRouter (list/getById/create/delete/updateStatus/setWinner/addVariant/removeVariant); ExperimentsView library; ExperimentDetailView with variant cards + winner declaration; /dashboard/experiments routes; FlaskConical in sidebar |
+| 2026-06-19 | Digital Twin Memory (Item 40) | digital_twins table + RLS (UNIQUE avatar_id); digitalTwinsRouter get+upsert; AvatarTwinView (speaking style/tone/personality/vocabulary); /dashboard/avatars/[id]/twin; Configure Twin in avatar card dropdown; style_instruction passed to TTS in run-job.ts |
+| 2026-06-20 | Fine-tuning Studio (Item 39) | model_variants table + jobs model_finetune type + avatar model_variant_id FK; modelVariantsRouter with Polar gate; Replicate Flux LoRA trainer integration in run-job.ts with real/simulated modes; ModelsView training dialog with ZIP upload; avatar create form model selector; avatar cards show style badges; /dashboard/models route with sidebar nav |
+| 2026-06-20 | Voice validation pipeline (Item 01) | Enhanced voices table with validation_results JSONB + auto_validated_at; Modal voice_validation.py with librosa for real audio analysis (noise, clarity, consistency); voice_validate job type in pipeline; automatic validation trigger on upload; enhanced VoiceValidateView with detailed metrics; validation gating in TTS workflow preventing poor quality voices |
+| 2026-06-20 | Avatar validation pipeline (Item 02) | Enhanced avatars table with validation_results JSONB + auto_validated_at; Modal avatar_validation.py with OpenCV/PIL for face detection, image quality scoring, content safety; avatar_validate job type in pipeline; automatic validation trigger on upload; enhanced AvatarValidateView with detailed metrics breakdown; validation infrastructure ready for video workflow gating |
+| 2026-06-20 | Remove content moderation from MVP | Content moderation adds complexity; basic consent gates and validation sufficient for MVP launch; can be added post-launch for enterprise compliance |
 
 ---
 

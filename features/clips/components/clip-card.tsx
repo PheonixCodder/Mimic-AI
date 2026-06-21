@@ -21,6 +21,7 @@ import { CLIP_STYLE_LABELS } from "../data/clip-options";
 import type { ClipStyle } from "../lib/schemas";
 import type { Clip } from "@/trpc/routers/clips";
 import { useTRPC } from "@/trpc/client";
+import { ClipViewerDialog } from "./clip-viewer-dialog";
 
 export type ClipItem = Clip;
 
@@ -47,6 +48,7 @@ function formatUpdatedAt(value: string) {
 
 export function ClipCard({ clip, canDelete = false }: ClipCardProps) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showViewer, setShowViewer] = useState(false);
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
@@ -82,117 +84,137 @@ export function ClipCard({ clip, canDelete = false }: ClipCardProps) {
   const isPendingOrProcessing = clip.status === "pending" || clip.status === "processing";
 
   return (
-    <div className="flex items-center gap-4 overflow-hidden rounded-xl border p-3 dark:border-zinc-800">
-      <div className="relative h-24 w-28 shrink-0 overflow-hidden rounded-lg bg-muted dark:bg-zinc-900 lg:h-28 lg:w-32">
-        {clip.r2ObjectKey ? (
-          <video
-            src={`/api/clips/${clip.id}`}
-            className="size-full object-cover"
-            controls={false}
-            muted
-            loop
-            playsInline
-            onMouseEnter={(e) => e.currentTarget.play().catch(() => {})}
-            onMouseLeave={(e) => {
-              e.currentTarget.pause();
-              e.currentTarget.currentTime = 0;
-            }}
-          />
-        ) : (
-          <div className="flex size-full items-center justify-center">
-            {isPendingOrProcessing ? (
-              <Loader2 className="size-8 animate-spin text-muted-foreground" />
-            ) : (
-              <Film className="size-8 text-muted-foreground" />
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="flex min-w-0 flex-1 flex-col gap-1 lg:gap-1.5">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="line-clamp-1 text-sm font-semibold tracking-tight text-foreground">
-            {clip.title}
-          </span>
-          <ClipStatusBadge status={clip.status} />
-          <span className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium transition-colors ${STYLE_BADGES[clip.style as ClipStyle] || ""}`}>
-            {CLIP_STYLE_LABELS[clip.style as ClipStyle] ?? clip.style}
-          </span>
+    <>
+      <div
+        className="flex items-center gap-4 overflow-hidden rounded-xl border p-3 dark:border-zinc-800 cursor-pointer hover:bg-zinc-50/50 dark:hover:bg-zinc-950/40 hover:border-zinc-300 dark:hover:border-zinc-700 transition-all duration-200 active:scale-[0.995]"
+        onClick={() => setShowViewer(true)}
+      >
+        <div className="relative h-24 w-28 shrink-0 overflow-hidden rounded-lg bg-muted dark:bg-zinc-900 lg:h-28 lg:w-32">
+          {clip.r2ObjectKey ? (
+            <video
+              src={`/api/clips/${clip.id}`}
+              className="size-full object-cover"
+              controls={false}
+              muted
+              loop
+              playsInline
+              onMouseEnter={(e) => e.currentTarget.play().catch(() => {})}
+              onMouseLeave={(e) => {
+                e.currentTarget.pause();
+                e.currentTarget.currentTime = 0;
+              }}
+            />
+          ) : (
+            <div className="flex size-full items-center justify-center">
+              {isPendingOrProcessing ? (
+                <Loader2 className="size-8 animate-spin text-muted-foreground" />
+              ) : (
+                <Film className="size-8 text-muted-foreground" />
+              )}
+            </div>
+          )}
         </div>
 
-        <p className="line-clamp-2 text-xs text-muted-foreground">
-          {clip.prompt || "No prompt provided."}
-        </p>
+        <div className="flex min-w-0 flex-1 flex-col gap-1 lg:gap-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="line-clamp-1 text-sm font-semibold tracking-tight text-foreground">
+              {clip.title}
+            </span>
+            <ClipStatusBadge status={clip.status} />
+            <span className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium transition-colors ${STYLE_BADGES[clip.style as ClipStyle] || ""}`}>
+              {CLIP_STYLE_LABELS[clip.style as ClipStyle] ?? clip.style}
+            </span>
+          </div>
 
-        <p className="text-[10px] text-muted-foreground/80 lg:text-xs">
-          {clip.durationSeconds}s · {clip.aspectRatio} · {clip.resolution} · Updated{" "}
-          {formatUpdatedAt(clip.updatedAt)}
-        </p>
+          <p className="line-clamp-2 text-xs text-muted-foreground">
+            {clip.prompt || "No prompt provided."}
+          </p>
+
+          <p className="text-[10px] text-muted-foreground/80 lg:text-xs">
+            {clip.durationSeconds}s · {clip.aspectRatio} · {clip.resolution} · Updated{" "}
+            {formatUpdatedAt(clip.updatedAt)}
+          </p>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1.5 pr-1 lg:pr-3">
+          {isIdle ? (
+            <Button
+              variant="outline"
+              size="icon"
+              className="size-8 rounded-full border-primary/20 hover:bg-primary/5 dark:border-primary/30"
+              disabled={generateMutation.isPending}
+              onClick={(e) => {
+                e.stopPropagation();
+                generateMutation.mutate({ id: clip.id });
+              }}
+              title="Generate Clip"
+            >
+              {generateMutation.isPending ? (
+                <Loader2 className="size-4 animate-spin text-primary" />
+              ) : (
+                <Play className="size-4 fill-primary text-primary" />
+              )}
+            </Button>
+          ) : null}
+
+          {canDelete ? (
+            <Button
+              variant="outline"
+              size="icon"
+              className="size-8 rounded-full border-destructive/20 text-destructive hover:bg-destructive/5 dark:border-destructive/30"
+              disabled={deleteMutation.isPending}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowDeleteDialog(true);
+              }}
+              title="Delete Clip"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          ) : null}
+
+          {canDelete ? (
+            <div onClick={(e) => e.stopPropagation()}>
+              <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+                <AlertDialogContent className="max-w-md rounded-2xl">
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete clip?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Are you sure you want to delete &quot;{clip.title}&quot;?
+                      This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel disabled={deleteMutation.isPending} className="rounded-xl">
+                      Cancel
+                    </AlertDialogCancel>
+                    <Button
+                      variant="destructive"
+                      disabled={deleteMutation.isPending}
+                      className="rounded-xl"
+                      onClick={() => {
+                        deleteMutation.mutate(
+                          { id: clip.id },
+                          { onSuccess: () => setShowDeleteDialog(false) },
+                        );
+                      }}
+                    >
+                      {deleteMutation.isPending ? "Deleting..." : "Delete"}
+                    </Button>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+          ) : null}
+        </div>
       </div>
 
-      <div className="flex shrink-0 items-center gap-1.5 pr-1 lg:pr-3">
-        {isIdle ? (
-          <Button
-            variant="outline"
-            size="icon"
-            className="size-8 rounded-full border-primary/20 hover:bg-primary/5 dark:border-primary/30"
-            disabled={generateMutation.isPending}
-            onClick={() => generateMutation.mutate({ id: clip.id })}
-            title="Generate Clip"
-          >
-            {generateMutation.isPending ? (
-              <Loader2 className="size-4 animate-spin text-primary" />
-            ) : (
-              <Play className="size-4 fill-primary text-primary" />
-            )}
-          </Button>
-        ) : null}
-
-        {canDelete ? (
-          <Button
-            variant="outline"
-            size="icon"
-            className="size-8 rounded-full border-destructive/20 text-destructive hover:bg-destructive/5 dark:border-destructive/30"
-            disabled={deleteMutation.isPending}
-            onClick={() => setShowDeleteDialog(true)}
-            title="Delete Clip"
-          >
-            <Trash2 className="size-4" />
-          </Button>
-        ) : null}
-
-        {canDelete ? (
-          <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-            <AlertDialogContent className="max-w-md rounded-2xl">
-              <AlertDialogHeader>
-                <AlertDialogTitle>Delete clip?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Are you sure you want to delete &quot;{clip.title}&quot;?
-                  This action cannot be undone.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel disabled={deleteMutation.isPending} className="rounded-xl">
-                  Cancel
-                </AlertDialogCancel>
-                <Button
-                  variant="destructive"
-                  disabled={deleteMutation.isPending}
-                  className="rounded-xl"
-                  onClick={() => {
-                    deleteMutation.mutate(
-                      { id: clip.id },
-                      { onSuccess: () => setShowDeleteDialog(false) },
-                    );
-                  }}
-                >
-                  {deleteMutation.isPending ? "Deleting..." : "Delete"}
-                </Button>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        ) : null}
-      </div>
-    </div>
+      <ClipViewerDialog
+        clip={clip}
+        open={showViewer}
+        onOpenChange={setShowViewer}
+        canDelete={canDelete}
+      />
+    </>
   );
 }

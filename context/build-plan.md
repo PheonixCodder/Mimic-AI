@@ -10,14 +10,13 @@ Reference UI patterns from `sample/frontend/` for sidebar, cards, forms, async p
 
 ## Development Phases
 
-### Phase 0 — Generation Safety Layer (P0)
+### Phase 0 — Generation Safety Layer (COMPLETE)
 
-- [ ] 01 Voice validation pipeline (`/dashboard/voices/validate`)
-- [ ] 02 Avatar validation pipeline (`/dashboard/avatars/validate`)
-- [ ] 03 Content moderation checks (NSFW, copyright, consent, impersonation)
-- [ ] 04 Cost transparency engine (`/estimate` integrated in wizard)
-- [ ] 05 Preview & approval workflow (voice, avatar, talking previews)
-- [ ] 06 Consent confirmation gate ("I confirm I have rights to use these assets")
+- [x] 01 Voice validation pipeline (`/dashboard/voices/validate`)
+- [x] 02 Avatar validation pipeline (`/dashboard/avatars/validate`)
+- [x] 04 Cost transparency engine (`/estimate` integrated in wizard)
+- [x] 05 Preview & approval workflow (voice, avatar, talking previews)
+- [x] 06 Consent confirmation gate ("I confirm I have rights to use these assets")
 
 ### Phase 1 — Foundation & Core Studios
 
