@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "@vercel/next",
+      "config": {
+        "installCommand": "bun install --frozen-lockfile",
+        "buildCommand": "bun run build"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "headers": { "Content-Type": "application/json" }
+    },
+    {
+      "src": "/(.*)\\.(png|jpg|jpeg|gif|webp|avif|ico|bmp|svg)$",
+      "headers": { "Cache-Control": "public, max-age=31536000, immutable" }
+    }
+  ]
+}
