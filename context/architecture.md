@@ -19,6 +19,7 @@
 | **Observability** | Basic self-hosted logging initially (no PostHog) |
 | **CDN** | Cloudflare |
 | **Deploy** | Self-hosted Next.js + InsForge; Docker Compose first; Kubernetes later |
+| **AI Agents** | Deep Agents + LangGraph + MCP for Co-Producer system |
 
 ## Folder Structure
 
@@ -30,9 +31,15 @@ mimic-ai/
 │   ├── (marketing)/        # Public marketing pages
 │   ├── (auth)/             # Login, signup
 │   ├── (dashboard)/        # Authenticated app shell
+│   │   └── agent/           # Co-Producer AI Agent routes (NEW!)
 │   ├── (admin)/            # Admin shell
-│   └── api/                # Route handlers (webhooks, uploads, audio proxy)
+│   └── api/                # Route handlers (webhooks, uploads, audio proxy, agent endpoints)
+│       └── agent/           # Agent streaming & review endpoints (NEW!)
 ├── features/               # Feature modules (domain logic + UI)
+│   ├── agent/              # Co-Producer AI Agent (NEW!)
+│   │   ├── config/         # Model configurations
+│   │   ├── lib/            # Core agent logic (builder, tools, memory, mcp, stream-sse, util)
+│   │   └── views/          # React UI components
 │   ├── dashboard/
 │   ├── voices/
 │   ├── avatars/
@@ -46,10 +53,12 @@ mimic-ai/
 │   ├── workspaces/
 │   └── ...
 ├── components/             # Shared UI (shadcn/ui + app-wide components)
+│   └── ai-elements/        # 35+ AI element components (NEW!)
 ├── lib/                    # InsForge client, R2, Polar, env, utils
 ├── server/                 # Server-only modules (orchestration, validation)
 ├── trigger/                # Trigger.dev background tasks
 ├── trpc/                   # tRPC routers, procedures, client setup
+│   └── agent.ts            # Agent tRPC router (NEW!)
 ├── hooks/                  # Shared React hooks
 ├── stores/                 # Client state (if needed)
 ├── config/                 # App configuration
@@ -57,6 +66,7 @@ mimic-ai/
 ├── styles/                 # Additional styles (if needed)
 ├── utils/                  # Pure utility functions
 ├── context/                # CDD context files (this directory)
+├── deep-agents/            # Deep Agents integration (submodule) (NEW!)
 ├── sample/                 # Reference project (Resonance AI — do not deploy)
 └── modal/                  # Modal GPU services (Python)
 ```
