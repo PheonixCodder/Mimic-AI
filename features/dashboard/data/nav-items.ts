@@ -1,4 +1,5 @@
 import {
+  Bot,
   Clapperboard,
   Cpu,
   FileText,
@@ -34,6 +35,7 @@ export const dashboardNavSections: NavSection[] = [
   {
     items: [
       { title: "Dashboard", url: "/dashboard", icon: Home },
+      { title: "Co-Producer", url: "/dashboard/agent", icon: Bot },
       { title: "Projects", url: "/dashboard/projects", icon: FolderKanban },
       { title: "Videos", url: "/dashboard/videos", icon: Clapperboard },
       { title: "Clips", url: "/dashboard/clips", icon: Film },
