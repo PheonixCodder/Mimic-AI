@@ -60,6 +60,8 @@ Every generation passes through validation, cost estimation, and user approval *
 
 ```
 /dashboard                      -> Overview and quick actions
+/dashboard/agent                 -> Co-Producer AI Agent (NEW!)
+/dashboard/agent/[threadId]      -> Individual conversation thread
 /dashboard/projects             -> Project management
 /dashboard/videos               -> Video library
 /dashboard/videos/new           -> Generate video wizard
@@ -170,11 +172,31 @@ Reuse via Templates
 ## Secondary Flows
 
 - **Onboarding:** Profile setup, tutorials, sample project
+- **Co-Producer:** AI-assisted video creation, natural language interface, tool orchestration
 - **Billing:** Metered Polar pricing, invoices, usage tracking, credit warnings
-- **Settings:** Security, API keys, preferences
+- **Settings:** Security, API keys, preferences, agent configuration
 - **Team:** Workspace invites, roles, permissions (custom InsForge-backed workspaces)
 - **Administration:** User management, usage oversight
 - **Webhooks:** Completion, failure, and retry callbacks for async jobs
+
+### Co-Producer AI Agent
+
+The **Co-Producer** is a domain-specific AI assistant that acts as your video production partner. Accessible at `/dashboard/agent`, it provides:
+
+- **Natural Language Interface:** Describe your video idea in plain English
+- **Intelligent Guidance:** Walks you through the entire creation pipeline
+- **Tool Orchestration:** Uses 35+ specialized tools to accomplish tasks
+- **Real-Time Collaboration:** Streaming responses with visible reasoning
+- **Memory:** Remembers your preferences and workspace context
+- **Human-in-the-Loop:** Approval gates for important decisions
+
+**Example Usage:**
+- "Create a tutorial video about React hooks with my voice"
+- "List all my voices and show me the best one for tutorials"
+- "Generate a script for a product demo"
+- "What's my remaining credit balance?"
+
+See `context/agent-system.md` for detailed documentation.
 
 ## MVP Scope (6–8 weeks)
 
