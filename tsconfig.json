@@ -41,6 +41,12 @@
   "exclude": [
     "node_modules",
     "sample",
-    "heygen-clone"
+    "heygen-clone",
+    "heygen-clone2",
+    "opengen-ai",
+    "nextjs-agent",
+    "agent-studio",
+    "agent-gpt",
+    "deep-agents"
   ]
 }

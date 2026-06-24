@@ -21,6 +21,7 @@ import { voicesRouter } from "./voices";
 import { webhooksRouter } from "./webhooks";
 import { workspacesRouter } from "./workspaces";
 import { billingRouter } from "./billing";
+import { agentRouter } from "./agent";
 
 export const appRouter = createTRPCRouter({
   health: healthRouter,
@@ -45,6 +46,7 @@ export const appRouter = createTRPCRouter({
   modelVariants: modelVariantsRouter,
   webhooks: webhooksRouter,
   billing: billingRouter,
+  agent: agentRouter,
 });
 
 export type AppRouter = typeof appRouter;

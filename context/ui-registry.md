@@ -303,4 +303,42 @@ These exist in `sample/frontend/` and should be reimplemented for mimic-ai with 
 - Premium badge: `rounded-xl border border-green-200/50 bg-green-50/50 p-3 text-xs text-green-800`
 - Opacity slider: `w-full accent-primary`
 
+### Slider
+**Path:** `components/ui/slider.tsx`
+**Classes:**
+- Track/thumb wrapper: `relative flex w-full touch-none select-none items-center py-2`
+- Track: `relative h-1.5 w-full grow overflow-hidden rounded-full bg-muted`
+- Range filling: `absolute h-full bg-primary`
+- Thumb: `absolute top-1/2 -translate-y-1/2 size-4 rounded-full border border-primary/50 bg-background shadow`
+
+### AgentView
+**Path:** `features/agent/views/agent-view.tsx`
+**Classes:**
+- Shell: `flex h-[calc(100vh-0rem)] w-full overflow-hidden bg-background`
+
+### ThreadSidebar
+**Path:** `features/agent/views/thread-sidebar.tsx`
+**Classes:**
+- Sidebar container: `flex w-80 shrink-0 flex-col border-r bg-muted/20`
+- Section labels: `font-semibold text-sm tracking-tight font-outfit`
+- Thread item active: `bg-emerald-500/10 border-emerald-500/30 text-foreground font-medium`
+
+### SettingsPanel
+**Path:** `features/agent/views/settings-panel.tsx`
+**Classes:**
+- Form card: `mt-3 p-3 rounded-lg border bg-background space-y-4 text-xs font-outfit`
+- Warnings: `text-[10px] text-amber-500 mt-1 leading-normal font-outfit`
+
+### MessageList
+**Path:** `features/agent/views/message-list.tsx`
+**Classes:**
+- Message wrapper: `Message key={m.id} from={m.role}`
+- Message contents: `text-sm leading-relaxed prose prose-emerald dark:prose-invert`
+
+### InterruptWizard
+**Path:** `features/agent/views/interrupt-wizard.tsx`
+**Classes:**
+- Dialog block: `mt-4 border-amber-500/30 bg-amber-500/5 p-4 shadow-sm rounded-xl font-outfit`
+- Header: `flex items-center gap-2 text-amber-600 font-semibold text-xs uppercase tracking-wider mb-2`
+
 
